@@ -29,8 +29,11 @@ RDS_DB_NAME = 'gatecache'
 RDS_PORT = 3306
 
 class OptimizedGateway:
-    def __init__(self):
+    def __init__(self,gateway_host:str=GATEWAY_HOST,gateway_port:int=GATEWAY_PORT,server_url:str = SERVER_URL):
         self.app = FastAPI()
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
+        self.server_url = server_url
         os.makedirs(LOG_DIR, exist_ok=True)
         self._init_db()
 
@@ -142,7 +145,7 @@ class OptimizedGateway:
             while attempt < ATTEMPT_TIMES:
                 attempt += 1
                 try:
-                    res = requests.get(f"{SERVER_URL}/api/process", params=params, timeout=2.0)
+                    res = requests.get(f"{self.server_url}/api/process", params=params, timeout=2.0)
                     self._log("SUCCESS", f"[REQ-{request_id}] [第 {attempt} 次尝试]")
                     if random.random() < UPSTREAM_FAULT_PROB:
                         self._log("WARNING", f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
@@ -179,8 +182,8 @@ class OptimizedGateway:
 
         @self.app.post("/api/report")
         async def report(payload: Dict[str, Any] = Body(...)):
-            return requests.post(f"{SERVER_URL}/api/report_fault", json=payload).json()
+            return requests.post(f"{self.server_url}/api/report_fault", json=payload).json()
 
         import uvicorn
-        self._log("START", f"网关启动，监听 {GATEWAY_HOST}:{GATEWAY_PORT} ...")
-        uvicorn.run(self.app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level="error")
+        self._log("START", f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
+        uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")

@@ -49,10 +49,12 @@ redis_client = redis.Redis(
 # ============================================
 
 class OptimizedServer:
-    def __init__(self):
+    def __init__(self,host:str = HOST,port:int=PORT):
         self.app = FastAPI()
         os.makedirs(LOG_DIR, exist_ok=True)
         # self._init_redis()
+        self.host = host
+        self.port = port
         self._init_alert_system()
 
     def _init_redis(self):
@@ -186,5 +188,5 @@ class OptimizedServer:
                 return {"status": "ok"}
             return {"status": "error", "msg": "No token provided"}
 
-        self._log("START", f"服务端启动，监听 {HOST}:{PORT} ...")
-        uvicorn.run(self.app, host=HOST, port=PORT, log_level="error")
+        self._log("START", f"服务端启动，监听 {self.host}:{self.port} ...")
+        uvicorn.run(self.app, host=self.host, port=self.port, log_level="error")

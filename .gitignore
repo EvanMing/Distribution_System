@@ -1,0 +1,15 @@
+# 忽略 Firebase 密钥文件
+serviceAccountKey.json
+
+# 运行日志与结果
+logs/
+experiment_results/
+
+# Python 缓存与环境
+__pycache__/
+.venv/
+*.pyc
+
+# IDE 配置
+.vscode/
+.idea/

@@ -45,7 +45,7 @@ VALKEY_ENDPOINT = 'com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazona
 def get_redis_host():
     import socket
     # 如果主机名包含 compute.internal，说明在 EC2 内部运行
-    if "laptop" in socket.gethostname().lowwer():
+    if "laptop" in socket.gethostname().lower():
         return "127.0.0.1"
     return VALKEY_ENDPOINT
 

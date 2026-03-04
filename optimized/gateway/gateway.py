@@ -22,10 +22,10 @@ UPSTREAM_FAULT_PROB = 0.2
 DOWNSTREAM_FAULT_PROB = 0.2
 
 # ================= AWS RDS MySQL 配置 =================
-RDS_HOST = 'dbinstance.ccljabrlaulk.us-east-1.rds.amazonaws.com'
+RDS_HOST = 'database-1.c6e9ussx1jfj.us-east-1.rds.amazonaws.com'
 RDS_USER = 'admin'
 RDS_PASSWORD = '12345678'
-RDS_DB_NAME = 'gatecache'
+RDS_DB_NAME = 'gatewaycache'
 RDS_PORT = 3306
 
 class OptimizedGateway:
@@ -77,7 +77,7 @@ class OptimizedGateway:
                     CREATE TABLE IF NOT EXISTS task_cache (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         task_type VARCHAR(255) NOT NULL,
-                        task_id VARCHAR(20) NOT NUL,
+                        task_id VARCHAR(20) NOT NULL,
                         response_data JSON NOT NULL,
                         ts DOUBLE NOT NULL,
                         INDEX idx_task_type (task_type)

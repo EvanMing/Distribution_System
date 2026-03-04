@@ -4,8 +4,8 @@ if __name__ == "__main__":
     def get_server_host():
         import socket
         print('hostname:',socket.gethostname())
-        if "compute" in socket.gethostname():
-            return '0.0.0.0'
-        return "127.0.0.1" 
+        if "laptop" in socket.gethostname().lowwer():
+            return "127.0.0.1" 
+        return '0.0.0.0'
     server = OptimizedServer(host = get_server_host(),port=8000)
     server.run()

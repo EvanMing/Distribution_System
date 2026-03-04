@@ -7,6 +7,16 @@ experiment_results/
 
 # Python 缓存与环境
 __pycache__/
+optimized/__pycache__/
+optimized/client/__pycache__/
+optimized/gateway/__pycache__/
+optimized/server/__pycache__/
+
+traditional/__pycache__/
+traditional/client/__pycache__/
+traditional/gateway/__pycache__/
+traditional/server/__pycache__/
+
 .venv/
 *.pyc
 

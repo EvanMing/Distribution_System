@@ -38,26 +38,41 @@ REDIS_PORT = 6379
 REDIS_PASSWORD = None     # 如果有密码，填入字符串，如 '123456'
 IDEMPOTENCY_EXPIRE = 86400  # 幂等记录保留 24 小时
 
+# ================= Valkey (Redis 兼容) 配置 =================
+VALKEY_ENDPOINT = 'com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazonaws.com'
+
+# 逻辑判断：如果在 EC2 环境则连云端，本地则连隧道映射的 localhost
+def get_redis_host():
+    import socket
+    # 如果主机名包含 compute.internal，说明在 EC2 内部运行
+    if "compute" in socket.gethostname():
+        return VALKEY_ENDPOINT
+    return "127.0.0.1"
+
+ACTIVE_REDIS_HOST = get_redis_host()
+REDIS_PORT = 6379
+
 # 初始化 Redis 连接池
 redis_client = redis.Redis(
-    host=REDIS_HOST, 
+    host=ACTIVE_REDIS_HOST, 
     port=REDIS_PORT, 
-    password=REDIS_PASSWORD,
+    password=None, # AWS Valkey 默认内网连接通常不设密码
     db=0, 
     decode_responses=True
 )
-# ============================================
+# ==========================================================
 
 class OptimizedServer:
     def __init__(self,host:str = HOST,port:int=PORT):
         self.app = FastAPI()
         os.makedirs(LOG_DIR, exist_ok=True)
-        # self._init_redis()
+        self._init_redis()
         self.host = host
         self.port = port
         self._init_alert_system()
 
     def _init_redis(self):
+        self._log("INIT", f"init Redis...")
         try:
             redis_client.ping()
             self._log("INIT", f"Redis 连接成功 ({REDIS_HOST}:{REDIS_PORT})，幂等性保障已开启！")
@@ -147,12 +162,12 @@ class OptimizedServer:
             # ================= 核心：幂等性校验 =================
             idem_key = f"idem:task:{task_id}"
             
-            # cached_data = redis_client.get(idem_key)
+            cached_data = redis_client.get(idem_key)
 
-            # if cached_data:
-            #     cached_response = json.loads(cached_data)
-            #     cached_response["server_note"] = "Idempotent Cache Hit - Returned Cached Result"
-            #     return cached_response
+            if cached_data:
+                cached_response = json.loads(cached_data)
+                cached_response["server_note"] = "Idempotent Cache Hit - Returned Cached Result"
+                return cached_response
             
             # =================================================
 
@@ -161,8 +176,8 @@ class OptimizedServer:
             
             final_response = self._makeup_response(task_id=task_id, task_type=task_type)
             
-            # if final_response.get('status')=='success':
-            #     redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
+            if final_response.get('status')=='success':
+                redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
             
             self._log("SUCCESS", f"[REQ-{request_id}] {task_type} 处理完毕，结果已固化至 Redis。") 
             return final_response

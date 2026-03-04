@@ -116,4 +116,4 @@ Generated: {self._get_ts()}
         self.running = False
         self._save_result()
 
-if __name__ == "__main__": OptimizedClient(gateway_host='127.0.0.1',gateway_port=8080).run()
+if __name__ == "__main__": OptimizedClient(gateway_host='172.31.22.227',gateway_port=8080).run()

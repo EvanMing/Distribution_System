@@ -11,9 +11,14 @@ import pymysql
 import pymysql.cursors
 import requests
 from fastapi import FastAPI, Body
+from contextlib import closing
+import os
+from dotenv import load_dotenv
 
 # 引入数据库连接池
 from dbutils.pooled_db import PooledDB 
+
+load_dotenv()
 
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 SERVER_URL = "http://127.0.0.1:8000"
@@ -27,12 +32,15 @@ UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
 
 # ================= AWS RDS MySQL 配置 =================
-RDS_HOST = 'database-1.c6e9ussx1jfj.us-east-1.rds.amazonaws.com'
-RDS_USER = 'admin'
-RDS_PASSWORD = '12345678'
-RDS_DB_NAME = 'gatewaycache'
+
+RDS_HOST = os.getenv('RDS_HOST', 'localhost')
+RDS_USER = os.getenv('RDS_USER', 'root')
+RDS_PASSWORD = os.getenv('RDS_PASSWORD')  # 找不到会返回 None
+RDS_DB_NAME = os.getenv('RDS_DB_NAME', 'gatewaycache')
 RDS_DB_TABLE = 'task_cache'
-RDS_PORT = 3306
+RDS_PORT = 3306 
+
+# =====================================================
 
 class OptimizedGateway:
     def __init__(self, gateway_host:str=GATEWAY_HOST, gateway_port:int=GATEWAY_PORT, server_url:str = SERVER_URL):
@@ -128,32 +136,32 @@ class OptimizedGateway:
                 response_data = json.dumps(response_data, ensure_ascii=False)
             
             try:
-                connection = self._get_db_connection()
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        f'INSERT INTO {RDS_DB_TABLE} (task_type, task_id, response_data, ts) VALUES (%s, %s, %s, %s)',
-                        (task_type, task_id, response_data, datetime.datetime.now().timestamp())
-                    )
-                    
-                    # 容量控制
-                    cursor.execute(f'SELECT COUNT(*) as count FROM {RDS_DB_TABLE}')
-                    count = cursor.fetchone()['count']
-                    if count > MAX_CACHE_SIZE:
-                        delete_count = int(MAX_CACHE_SIZE * 0.2)
+                with closing(self._get_db_connection()) as connection:
+                    with connection.cursor() as cursor:
                         cursor.execute(
-                            f'DELETE FROM {RDS_DB_TABLE} ORDER BY ts ASC LIMIT %s',
-                            (delete_count,)
+                            f'INSERT INTO {RDS_DB_TABLE} (task_type, task_id, response_data, ts) VALUES (%s, %s, %s, %s)',
+                            (task_type, task_id, response_data, datetime.datetime.now().timestamp())
                         )
-                        self._log("CACHE_CLEAN", f"RDS 自动清理了 {delete_count} 条数据。")
-                connection.commit()
-                connection.close() # 释放回连接池
+                        
+                        # 容量控制
+                        cursor.execute(f'SELECT COUNT(*) as count FROM {RDS_DB_TABLE}')
+                        count = cursor.fetchone()['count']
+                        if count > MAX_CACHE_SIZE:
+                            delete_count = int(MAX_CACHE_SIZE * 0.2)
+                            cursor.execute(
+                                f'DELETE FROM {RDS_DB_TABLE} ORDER BY ts ASC LIMIT %s',
+                                (delete_count,)
+                            )
+                            self._log("CACHE_CLEAN", f"RDS 自动清理了 {delete_count} 条数据。")
+                    connection.commit()
             except Exception as e:
                 self._log("ERROR", f"后台写入 RDS 失败: {e}")
 
         self.executor.submit(_do_save)
             
     def _get_from_cache(self, task_type: str, task_id: str) -> dict:
-        """重试耗尽时：从 RDS 取出最新历史脏数据"""
+        
+        connection = None
         try:
             connection = self._get_db_connection()
             with connection.cursor() as cursor:
@@ -162,13 +170,15 @@ class OptimizedGateway:
                     (task_type, task_id)
                 )
                 row = cursor.fetchone()
-            connection.close() # 释放回连接池
-            
+                
             if row:
                 data = row['response_data']
                 return json.loads(data) if isinstance(data, str) else data
         except Exception as e:
             self._log("ERROR", f"读取 RDS 缓存失败: {e}")
+        finally:
+            if connection:
+                connection.close()
         return None
 
     def _clear_cache_table(self):

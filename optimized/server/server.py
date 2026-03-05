@@ -8,6 +8,11 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 HOST, PORT = "127.0.0.1", 8000
 LOG_DIR = "logs/optimized"
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
@@ -32,25 +37,22 @@ FAULT_LEVEL=[
     'emergency','high','medium','low'
 ]
 
-# ================= Redis 配置 =================
-REDIS_HOST = 'localhost'  # 如果 Redis 在其他服务器，换成对应的 IP
-REDIS_PORT = 6379
-REDIS_PASSWORD = None     # 如果有密码，填入字符串，如 '123456'
-IDEMPOTENCY_EXPIRE = 86400  # 幂等记录保留 24 小时
-
 # ================= Valkey (Redis 兼容) 配置 =================
-VALKEY_ENDPOINT = 'com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazonaws.com'
+
+IDEMPOTENCY_EXPIRE = 86400  # 幂等记录保留 24 小时
+VALKEY_ENDPOINT = os.getenv('VALKEY_ENDPOINT', 'localhost')
+# VALKEY_ENDPOINT = 'com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazonaws.com'
+REDIS_PORT = 6379
 
 # 逻辑判断：如果在 EC2 环境则连云端，本地则连隧道映射的 localhost
 def get_redis_host():
     import socket
-    # 如果主机名包含 compute.internal，说明在 EC2 内部运行
+    
     if "laptop" in socket.gethostname().lower():
         return "127.0.0.1"
     return VALKEY_ENDPOINT
 
 ACTIVE_REDIS_HOST = get_redis_host()
-REDIS_PORT = 6379
 
 # 初始化 Redis 连接池
 redis_client = redis.Redis(
@@ -63,6 +65,8 @@ redis_client = redis.Redis(
 
 IS_REDIS_CONNECTED = False
 # ==========================================================
+
+FIREBASE_CERT_PATH = os.getenv('FIREBASE_CERT_PATH', 'serviceAccountKey.json')
 
 class OptimizedServer:
     def __init__(self,host:str = HOST,port:int=PORT):
@@ -78,14 +82,14 @@ class OptimizedServer:
         try:
             redis_client.ping()
             IS_REDIS_CONNECTED = True
-            self._log("INIT", f"Redis 连接成功 ({REDIS_HOST}:{REDIS_PORT})，幂等性保障已开启！")
+            self._log("INIT", f"Redis 连接成功 ({ACTIVE_REDIS_HOST}:{REDIS_PORT})，幂等性保障已开启！")
         except redis.ConnectionError as e:
             self._log("WARNING", f"无法连接到 Redis，请确认 Redis 服务已启动。错误信息: {e}")
 
     def _init_alert_system(self):
             try:
                 # 加载从 Firebase 控制台下载的 Service Account JSON
-                cred = credentials.Certificate("serviceAccountKey.json")
+                cred = credentials.Certificate(FIREBASE_CERT_PATH)
                 firebase_admin.initialize_app(cred)
                 self._log("INIT", "Firebase Alert System 已挂载。")
             except Exception as e:

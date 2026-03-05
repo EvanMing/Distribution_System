@@ -10,7 +10,7 @@ SERVER_URL = "http://127.0.0.1:8000"
 LOG_DIR = "logs/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
 
-UPSTREAM_FAULT_PROB = 0.2
+UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
 
 class TraditionalGateway:
@@ -43,11 +43,11 @@ class TraditionalGateway:
 
                 if random.random() < UPSTREAM_FAULT_PROB:
                     self._log(f"[REQ-{request_id}] [FAULT] 模拟上游网络丢包。无重试，直接失败。")
-                    time.sleep(6.0) 
+                    time.sleep(5.1) 
 
                 if random.random() < DOWNSTREAM_FAULT_PROB:
                     self._log(f"[REQ-{request_id}] [FAULT] 模拟下游网络丢包，客户端超时。")
-                    time.sleep(6.0) 
+                    time.sleep(5.1) 
 
                 return result
             except Exception as e:

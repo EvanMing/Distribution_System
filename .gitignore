@@ -1,6 +1,8 @@
 # 忽略 Firebase 密钥文件
 serviceAccountKey.json
 
+gateway_task_cache.csv
+
 # 运行日志与结果
 logs/
 experiment_results/

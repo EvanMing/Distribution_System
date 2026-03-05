@@ -140,16 +140,30 @@ class OptimizedServer:
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
-    def _makeup_response(self):
+    def _makeup_response(self,task_type:str):
         response = {}
         # 50% 概率成功，50% 概率失败
         status = 'success' if random.random() > 0.5 else 'failed'
         
         if status == 'success':
-            response['response_data'] = f"success to processing"
+            response['response_data'] = {
+                "code": 200,
+                "message": "处理成功",
+                "data": {
+                    "result": f"成功处理了{task_type}任务",
+                    "timestamp": self._get_ts()
+                }
+            }
         else:
-            response['response_data'] = f"failed to processing"
-            
+            response['response_data'] = {
+                "code": 500,
+                "message": "处理失败",
+                "data": {
+                    "error": "处理超时或系统错误",
+                    "timestamp": self._get_ts()
+                }
+            }
+        
         response['status'] = status
         return response
 
@@ -176,7 +190,7 @@ class OptimizedServer:
             # 2. 如果是新任务，往下执行业务处理
             time.sleep(0.1)
             
-            final_response = self._makeup_response()
+            final_response = self._makeup_response(task_type=task_type)
             
             if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
                 redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)

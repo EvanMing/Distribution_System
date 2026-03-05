@@ -1,18 +1,19 @@
-from turtle import pd
-
-from fastapi import FastAPI, Body
-import requests
+import os
 import time
 import datetime
-import os
 import random
-import pymysql
-import pymysql.cursors
 import json
 from typing import Dict, Any
-import json
 from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
+import pymysql
+import pymysql.cursors
+import requests
+from fastapi import FastAPI, Body
+
+# 引入数据库连接池
+from dbutils.pooled_db import PooledDB 
 
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 SERVER_URL = "http://127.0.0.1:8000"
@@ -22,7 +23,7 @@ MAX_LOG_SIZE = 50 * 1024 * 1024
 MAX_CACHE_SIZE = 1000  # 网关降级库最大缓存条数
 ATTEMPT_TIMES = 3
 
-UPSTREAM_FAULT_PROB = 0.2
+UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
 
 # ================= AWS RDS MySQL 配置 =================
@@ -34,14 +35,21 @@ RDS_DB_TABLE = 'task_cache'
 RDS_PORT = 3306
 
 class OptimizedGateway:
-    def __init__(self,gateway_host:str=GATEWAY_HOST,gateway_port:int=GATEWAY_PORT,server_url:str = SERVER_URL):
+    def __init__(self, gateway_host:str=GATEWAY_HOST, gateway_port:int=GATEWAY_PORT, server_url:str = SERVER_URL):
         self.app = FastAPI()
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.server_url = server_url
         os.makedirs(LOG_DIR, exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=10)
+        
+        # 1. 优先初始化数据库连接池
+        self._init_db_pool()
+        # 2. 然后再初始化表结构
         self._init_db()
+        # 3. 初始化时清空脏数据（你之前加的需求）
+        # self._clear_cache_table()
+        self._export_cache_to_csv()
 
     def _get_ts(self) -> str: return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
@@ -59,27 +67,43 @@ class OptimizedGateway:
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
-# ================= AWS RDS (MySQL) 操作 =================
+# ================= AWS RDS (MySQL) 操作优化 =================
+
+    def _init_db_pool(self):
+        """初始化 PyMySQL 连接池 (支持多线程高并发)"""
+        try:
+            self.db_pool = PooledDB(
+                creator=pymysql,            # 使用的数据库模块
+                maxconnections=10,          # 连接池允许的最大连接数
+                mincached=3,                # 初始化时，连接池中预先创建的空闲连接
+                maxcached=10,               # 链接池中最多闲置的链接
+                maxshared=0,                # 共享连接数（pymysql 不适用，设为 0）
+                blocking=True,              # 池中无可用连接时是否阻塞等待
+                maxusage=None,              # 单个连接最多被重复使用的次数 (None 表示无限制)
+                ping=0,                     # 1 = 每次从池中取出时 ping 一下检查连接是否有效，防止 MySQL wait_timeout 断开,0 (不进行连接健康检查)
+                host=RDS_HOST,
+                user=RDS_USER,
+                password=RDS_PASSWORD,
+                database=RDS_DB_NAME,
+                port=RDS_PORT,
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=5
+            )
+            self._log("INIT", "AWS RDS MySQL 连接池初始化成功！")
+        except Exception as e:
+            self._log("ERROR", f"RDS 连接池初始化失败: {e}")
 
     def _get_db_connection(self):
-        """获取 RDS 数据库连接"""
-        return pymysql.connect(
-            host=RDS_HOST,
-            user=RDS_USER,
-            password=RDS_PASSWORD,
-            database=RDS_DB_NAME,
-            port=RDS_PORT,
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor,
-            connect_timeout=5  # 防止连不上RDS导致网关启动卡死
-        )
+        """从连接池中获取一个可用的连接"""
+        # 注意：这里拿到的 connection 在调用 .close() 时，不会真正断开，而是归还给连接池
+        return self.db_pool.connection()
         
     def _init_db(self):
         """初始化 RDS 降级缓存表"""
         try:
             connection = self._get_db_connection()
             with connection.cursor() as cursor:
-                # 使用 MySQL 语法: AUTO_INCREMENT, 并利用原生 JSON 数据类型
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS task_cache (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -91,19 +115,24 @@ class OptimizedGateway:
                     )
                 ''')
             connection.commit()
-            connection.close()
+            connection.close() # 释放回连接池
             self._log("INIT", f"已成功连接并挂载 AWS RDS MySQL: {RDS_HOST}")
         except Exception as e:
             self._log("ERROR", f"RDS 数据库初始化失败，请检查网络或白名单: {e}")
 
-    def _save_to_cache(self, task_type: str, task_id: str, response_data: dict):
+    def _save_to_cache(self, task_type: str, task_id: str, response):
         def _do_save():
+            
+            response_data = response.get('response_data')
+            if isinstance(response_data, dict):
+                response_data = json.dumps(response_data, ensure_ascii=False)
+            
             try:
                 connection = self._get_db_connection()
                 with connection.cursor() as cursor:
                     cursor.execute(
                         f'INSERT INTO {RDS_DB_TABLE} (task_type, task_id, response_data, ts) VALUES (%s, %s, %s, %s)',
-                        (task_type, task_id, json.dumps(response_data), time.time())
+                        (task_type, task_id, response_data, datetime.datetime.now().timestamp())
                     )
                     
                     # 容量控制
@@ -117,26 +146,25 @@ class OptimizedGateway:
                         )
                         self._log("CACHE_CLEAN", f"RDS 自动清理了 {delete_count} 条数据。")
                 connection.commit()
-                connection.close()
+                connection.close() # 释放回连接池
             except Exception as e:
                 self._log("ERROR", f"后台写入 RDS 失败: {e}")
 
         self.executor.submit(_do_save)
             
-    def _get_from_cache(self, task_type: str,task_id: str) -> dict:
+    def _get_from_cache(self, task_type: str, task_id: str) -> dict:
         """重试耗尽时：从 RDS 取出最新历史脏数据"""
         try:
             connection = self._get_db_connection()
             with connection.cursor() as cursor:
                 cursor.execute(
                     'SELECT response_data FROM task_cache WHERE task_type = %s AND task_id = %s ORDER BY ts DESC LIMIT 1',
-                    (task_type,task_id)
+                    (task_type, task_id)
                 )
                 row = cursor.fetchone()
-            connection.close()
+            connection.close() # 释放回连接池
             
             if row:
-                # pymysql DictCursor 结合 JSON 字段，有时候直接返回 dict，有时返回 str，做个兼容
                 data = row['response_data']
                 return json.loads(data) if isinstance(data, str) else data
         except Exception as e:
@@ -144,27 +172,47 @@ class OptimizedGateway:
         return None
 
     def _clear_cache_table(self):
-            """清空 RDS 中的任务缓存表"""
-            try:
-                connection = self._get_db_connection()
-                with connection.cursor() as cursor:
-                    # 使用 TRUNCATE 清空数据并重置自增 ID
-                    cursor.execute(f'TRUNCATE TABLE {RDS_DB_TABLE}')
-                connection.commit()
-                connection.close()
-                self._log("INIT", f"已成功清空 RDS 缓存表: {RDS_DB_TABLE}")
-            except Exception as e:
-                self._log("ERROR", f"清空 RDS 缓存表失败: {e}")
+        """清空 RDS 中的任务缓存表"""
+        try:
+            connection = self._get_db_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(f'TRUNCATE TABLE {RDS_DB_TABLE}')
+            connection.commit()
+            connection.close() # 释放回连接池
+            self._log("INIT", f"已成功清空 RDS 缓存表: {RDS_DB_TABLE}")
+        except Exception as e:
+            self._log("ERROR", f"清空 RDS 缓存表失败: {e}")
                 
-    def export_cache_to_dataframe():
+    def _export_cache_to_csv(self, filename: str = "gateway_task_cache.csv"):
         try:
             query = f"SELECT * FROM {RDS_DB_TABLE}"
-            df = pd.read_sql(query, self._get_db_connection())
-            print(f"成功从 RDS 导出数据，总计: {len(df)} 行。")
+            connection = self._get_db_connection()
+            
+            data = None
+            
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                # fetchall() 拿到的直接是形如 [{'id': 1, 'task_type': '...'}, {...}] 的数据
+                data = cursor.fetchall()
+            
+            connection.close() 
+            
+            if not data:
+                self._log("EXPORT", "RDS 缓存表为空，没有数据可导出。")
+            
+            df = pd.DataFrame(data)
+            if not df.empty:
+                # index=False 表示不导出 DataFrame 的行索引
+                # encoding='utf-8-sig' 可以完美兼容 Windows Excel，防止中文乱码
+                df.to_csv(filename, index=False, encoding='utf-8-sig')
+                self._log("EXPORT", f"成功从 RDS 导出数据，总计: {len(df)} 行，已保存至: {filename}")
+            else:
+                self._log("EXPORT", "RDS 缓存表为空，没有数据可导出。")
+                
             return df
             
         except Exception as e:
-            print(f"导出失败: {e}")
+            self._log("ERROR", f"导出 CSV 失败: {e}")
             return pd.DataFrame()
                 
 # ========================================================
@@ -181,13 +229,13 @@ class OptimizedGateway:
                 try:
                     res = requests.get(f"{self.server_url}/api/process", params=params, timeout=2.0)
                     self._log("SUCCESS", f"[REQ-{request_id}] [第 {attempt} 次尝试]")
+                    
                     if random.random() < UPSTREAM_FAULT_PROB:
                         self._log("WARNING", f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
                         raise requests.exceptions.Timeout("Simulated upstream loss")
-                        
-                    success_response = res.json()
                     
-                    self._save_to_cache(task_type=task_type, task_id=task_id, response_data=success_response)
+                    success_response = res.json()
+                    self._save_to_cache(task_type=task_type, task_id=task_id, response=success_response)
                     self._log("SUCCESS", "成功拿到服务端响应。")
                     break
                 except Exception as _:
@@ -197,7 +245,7 @@ class OptimizedGateway:
             # 如果重试耗尽，从 AWS RDS 捞取降级缓存
             if not success_response:
                 self._log("DEGRADE_START", f"[REQ-{request_id}] 重试完全耗尽，正从 AWS RDS 提取兜底缓存...")
-                cached_data = self._get_from_cache(task_type,task_id)
+                cached_data = self._get_from_cache(task_type, task_id)
                 
                 if cached_data:
                     self._log("DEGRADE_HIT", f"[REQ-{request_id}] 命中 RDS 降级缓存！执行兜底返回。")
@@ -210,7 +258,7 @@ class OptimizedGateway:
                 
             if random.random() < DOWNSTREAM_FAULT_PROB:
                 self._log("FAULT", f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
-                time.sleep(6.0)
+                time.sleep(5.1)
                 
             return success_response
 

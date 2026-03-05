@@ -50,21 +50,34 @@ class TraditionalServer:
             time.sleep(0.1)
             self._log(f"[REQ-{request_id}] {task_type} 处理成功，已发出响应。")
             
-            return self._makeup_response()
+            return self._makeup_response(task_type=task_type)
             
         self._log(f"服务端启动，监听 {self.host}:{self.port} ...")
         uvicorn.run(self.app, host=self.host, port=self.port, log_level="error")
 
-    def _makeup_response(self):
+    def _makeup_response(self,task_type:str):
         response = {}
         # 50% 概率成功，50% 概率失败
         status = 'success' if random.random() > 0.5 else 'failed'
         
         if status == 'success':
-            response['response_data'] = f"success to processing"
+            response['response_data'] = {
+                "code": 200,
+                "message": "处理成功",
+                "data": {
+                    "result": f"成功处理了{task_type}任务",
+                    "timestamp": self._get_ts()
+                }
+            }
         else:
-            response['response_data'] = f"failed to processing"
-            
-        response['status'] = status
+            response['response_data'] = {
+                "code": 500,
+                "message": "处理失败",
+                "data": {
+                    "error": "处理超时或系统错误",
+                    "timestamp": self._get_ts()
+                }
+            }
         
+        response['status'] = status
         return response

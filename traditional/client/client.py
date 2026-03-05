@@ -89,7 +89,7 @@ Generated: {self._get_ts()}
   Client Timeout           : {REQUEST_TIMEOUT}s
   Total Requests           : {REQUEST_TIMES}
   Simulated Tasks          : [{", ".join(ML_TASK_TYPES)}]
-  Mimic Fault Config       : Upstream (20%) + Downstream (20%)
+  Mimic Fault Config       : Upstream (40%) + Downstream (20%)
   Server Handler Per Task  : 0.1s
 ==================================================
 [RELIABILITY METRICS]

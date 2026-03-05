@@ -29,7 +29,7 @@ FAULT_REASON = [
 ]
 
 FAULT_LEVEL=[
-    'high','medium','low'
+    'emergency','high','medium','low'
 ]
 
 # ================= Redis 配置 =================
@@ -60,6 +60,8 @@ redis_client = redis.Redis(
     db=0, 
     decode_responses=True
 )
+
+IS_REDIS_CONNECTED = False
 # ==========================================================
 
 class OptimizedServer:
@@ -75,6 +77,7 @@ class OptimizedServer:
         self._log("INIT", f"init Redis...")
         try:
             redis_client.ping()
+            IS_REDIS_CONNECTED = True
             self._log("INIT", f"Redis 连接成功 ({REDIS_HOST}:{REDIS_PORT})，幂等性保障已开启！")
         except redis.ConnectionError as e:
             self._log("WARNING", f"无法连接到 Redis，请确认 Redis 服务已启动。错误信息: {e}")
@@ -88,9 +91,9 @@ class OptimizedServer:
             except Exception as e:
                 self._log("WARNING", f"Firebase 初始化失败: {e}")
 
-    def _push_to_alert_system(self, task_id, task_type, req_id,timestamp:str):
+    def _push_to_alert_system(self, task_id, task_type, task_priority:str,req_id,timestamp:str,reason:str):
         
-            if len(alert_system_token_set)<1:
+            if len(alert_system_token_set) < 1:
                 self._log("WARNING", "推送失败：Redis 中没有找到已注册设备 Token")
                 return 
             
@@ -108,8 +111,8 @@ class OptimizedServer:
                         "task_id": task_id,
                         'task_type':task_type,
                         "timestamp": timestamp,
-                        'reason':random.choice(FAULT_REASON),
-                        'task_priority':random.choice(FAULT_LEVEL)
+                        'reason':reason,
+                        'task_priority':task_priority
                     },
                     token=token,
                     android=messaging.AndroidConfig(
@@ -162,7 +165,10 @@ class OptimizedServer:
             # ================= 核心：幂等性校验 =================
             idem_key = f"idem:task:{task_id}"
             
-            cached_data = redis_client.get(idem_key)
+            cached_data = None
+            
+            if IS_REDIS_CONNECTED:
+                cached_data = redis_client.get(idem_key)
 
             if cached_data:
                 cached_response = json.loads(cached_data)
@@ -176,10 +182,10 @@ class OptimizedServer:
             
             final_response = self._makeup_response(task_id=task_id, task_type=task_type)
             
-            if final_response.get('status')=='success':
+            if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
                 redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
+                self._log("SUCCESS", f"[REQ-{request_id}] {task_type} 处理完毕，结果已固化至 Redis。") 
             
-            self._log("SUCCESS", f"[REQ-{request_id}] {task_type} 处理完毕，结果已固化至 Redis。") 
             return final_response
 
         @self.app.post("/api/report_fault")
@@ -190,10 +196,21 @@ class OptimizedServer:
             timestamp = payload.get("timestamp", "unknown")
             self._log("REPORT", f"[REQ-{req_id}] 收到异常上报。任务类型: {task_type} 任务ID: {task_id}。")
             
-            self._push_to_alert_system(task_id, task_type, req_id,timestamp)
+            reason = random.choice(FAULT_REASON)
+            task_priority = random.choice(FAULT_LEVEL)
             
-            return {"status": "ack"}
-        
+            self._push_to_alert_system(task_id = task_id, 
+                            task_type = task_type,
+                            task_priority = task_priority, 
+                            req_id = req_id,
+                            timestamp = timestamp,
+                            reason = reason)
+            
+            if task_priority == 'low':
+                return {"status": "success", 'outcome':0, 'explaination':'resent this request again'}
+            else:
+                return {"status": "success", 'outcome':1, 'explaination':'Awaiting resolution'}
+            
         @self.app.post("/api/register_device")
         async def register_device(payload: Dict[str, Any] = Body(...)):
             token = payload.get("token")

@@ -9,6 +9,7 @@ import pymysql.cursors
 import json
 from typing import Dict, Any
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 SERVER_URL = "http://127.0.0.1:8000"
@@ -26,6 +27,7 @@ RDS_HOST = 'database-1.c6e9ussx1jfj.us-east-1.rds.amazonaws.com'
 RDS_USER = 'admin'
 RDS_PASSWORD = '12345678'
 RDS_DB_NAME = 'gatewaycache'
+RDS_DB_TABLE = 'task_cache'
 RDS_PORT = 3306
 
 class OptimizedGateway:
@@ -35,6 +37,7 @@ class OptimizedGateway:
         self.gateway_port = gateway_port
         self.server_url = server_url
         os.makedirs(LOG_DIR, exist_ok=True)
+        self.executor = ThreadPoolExecutor(max_workers=10)
         self._init_db()
 
     def _get_ts(self) -> str: return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -89,31 +92,32 @@ class OptimizedGateway:
         except Exception as e:
             self._log("ERROR", f"RDS 数据库初始化失败，请检查网络或白名单: {e}")
 
-    def _save_to_cache(self, task_type: str, task_id:str, response_data: dict):
-        """请求成功时：写入 RDS，并执行超量淘汰"""
-        try:
-            connection = self._get_db_connection()
-            with connection.cursor() as cursor:
-                # MySQL 使用 %s 作为占位符
-                cursor.execute(
-                    'INSERT INTO task_cache (task_type, task_id, response_data, ts) VALUES (%s, %s, %s, %s)',
-                    (task_type, task_id, json.dumps(response_data), time.time())
-                )
-                
-                # 容量控制
-                cursor.execute('SELECT COUNT(*) as count FROM task_cache')
-                count = cursor.fetchone()['count']
-                if count > MAX_CACHE_SIZE:
-                    delete_count = int(MAX_CACHE_SIZE * 0.2)
+    def _save_to_cache(self, task_type: str, task_id: str, response_data: dict):
+        def _do_save():
+            try:
+                connection = self._get_db_connection()
+                with connection.cursor() as cursor:
                     cursor.execute(
-                        'DELETE FROM task_cache ORDER BY ts ASC LIMIT %s',
-                        (delete_count,)
+                        f'INSERT INTO {RDS_DB_TABLE} (task_type, task_id, response_data, ts) VALUES (%s, %s, %s, %s)',
+                        (task_type, task_id, json.dumps(response_data), time.time())
                     )
-                    self._log("CACHE_CLEAN", f"RDS 缓存超过 {MAX_CACHE_SIZE} 条，自动清理最早的 {delete_count} 条。")
-            connection.commit()
-            connection.close()
-        except Exception as e:
-            self._log("ERROR", f"写入 RDS 缓存失败: {e}")
+                    
+                    # 容量控制
+                    cursor.execute(f'SELECT COUNT(*) as count FROM {RDS_DB_TABLE}')
+                    count = cursor.fetchone()['count']
+                    if count > MAX_CACHE_SIZE:
+                        delete_count = int(MAX_CACHE_SIZE * 0.2)
+                        cursor.execute(
+                            f'DELETE FROM {RDS_DB_TABLE} ORDER BY ts ASC LIMIT %s',
+                            (delete_count,)
+                        )
+                        self._log("CACHE_CLEAN", f"RDS 自动清理了 {delete_count} 条数据。")
+                connection.commit()
+                connection.close()
+            except Exception as e:
+                self._log("ERROR", f"后台写入 RDS 失败: {e}")
+
+        self.executor.submit(_do_save)
             
     def _get_from_cache(self, task_type: str,task_id: str) -> dict:
         """重试耗尽时：从 RDS 取出最新历史脏数据"""
@@ -152,7 +156,7 @@ class OptimizedGateway:
                         raise requests.exceptions.Timeout("Simulated upstream loss")
                         
                     success_response = res.json()
-                    # 异步存入 AWS RDS
+                    
                     self._save_to_cache(task_type=task_type, task_id=task_id, response_data=success_response)
                     self._log("SUCCESS", "成功拿到服务端响应。")
                     break

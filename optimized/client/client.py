@@ -55,10 +55,17 @@ class OptimizedClient:
                     req_id, task_id, task_type = task["request_id"], task["task_id"] ,task["task_type"]
                     self._log("REPORTING", f"[REQ-{req_id}] 异步尝试向服务端上报异常记录 [{task_id} - {task_type}]...")
                     res = requests.post(f"{self.gateway_url}/api/report", json=task)
-                    if res.json().get("status") == "ack":
-                        self._log("REPORT_SUCCESS", f"[REQ-{req_id}] 双向确认完成！从队列移除。")
-                        q.pop(0)
-                        with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+                    
+                    if res.status_code==200:
+                        json_res = res.json()
+                        self._log("REPORT_SUCCESS", f"[REQ-{req_id}] explaination: {json_res.get('explaination')}")
+                        if json_res.get('outcome')==1:
+                            self._log("REPORT_SUCCESS", f"[REQ-{req_id}] 双向确认完成！从队列移除。")
+                            q.pop(0)
+                            with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+                        else:
+                            # todo 这里应该怎么做？
+                            self._log("REPORT_SUCCESS", f"[REQ-{req_id}] resent request again")
             except: pass
             time.sleep(2.0)
 

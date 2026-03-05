@@ -1,3 +1,5 @@
+from turtle import pd
+
 from fastapi import FastAPI, Body
 import requests
 import time
@@ -10,6 +12,7 @@ import json
 from typing import Dict, Any
 import json
 from concurrent.futures import ThreadPoolExecutor
+import pandas as pd
 
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 SERVER_URL = "http://127.0.0.1:8000"
@@ -57,6 +60,7 @@ class OptimizedGateway:
         print(log_content.strip())
 
 # ================= AWS RDS (MySQL) 操作 =================
+
     def _get_db_connection(self):
         """获取 RDS 数据库连接"""
         return pymysql.connect(
@@ -138,6 +142,32 @@ class OptimizedGateway:
         except Exception as e:
             self._log("ERROR", f"读取 RDS 缓存失败: {e}")
         return None
+
+    def _clear_cache_table(self):
+            """清空 RDS 中的任务缓存表"""
+            try:
+                connection = self._get_db_connection()
+                with connection.cursor() as cursor:
+                    # 使用 TRUNCATE 清空数据并重置自增 ID
+                    cursor.execute(f'TRUNCATE TABLE {RDS_DB_TABLE}')
+                connection.commit()
+                connection.close()
+                self._log("INIT", f"已成功清空 RDS 缓存表: {RDS_DB_TABLE}")
+            except Exception as e:
+                self._log("ERROR", f"清空 RDS 缓存表失败: {e}")
+                
+    def export_cache_to_dataframe():
+        try:
+            query = f"SELECT * FROM {RDS_DB_TABLE}"
+            df = pd.read_sql(query, self._get_db_connection())
+            print(f"成功从 RDS 导出数据，总计: {len(df)} 行。")
+            return df
+            
+        except Exception as e:
+            print(f"导出失败: {e}")
+            return pd.DataFrame()
+                
+# ========================================================
 
     def run(self):
         @self.app.get("/api/forward")

@@ -14,8 +14,11 @@ UPSTREAM_FAULT_PROB = 0.2
 DOWNSTREAM_FAULT_PROB = 0.2
 
 class TraditionalGateway:
-    def __init__(self):
+    def __init__(self,gateway_host:str = GATEWAY_HOST,gateway_port:int = GATEWAY_PORT,server_url:str = SERVER_URL):
         self.app = FastAPI()
+        self.gateway_host= gateway_host
+        self.gateway_port = gateway_port
+        self.server_url = server_url
         os.makedirs(LOG_DIR, exist_ok=True)
 
     def _get_ts(self) -> str: 
@@ -35,7 +38,7 @@ class TraditionalGateway:
             params = {"request_id": request_id, "task_id": task_id, "task_type": task_type}
             
             try:
-                res = requests.get(f"{SERVER_URL}/api/process", params=params, timeout=2.0)
+                res = requests.get(f"{self.server_url}/api/process", params=params, timeout=2.0)
                 result = res.json()
 
                 if random.random() < UPSTREAM_FAULT_PROB:
@@ -52,8 +55,5 @@ class TraditionalGateway:
                 return { "status": "failed",'response_data':'gateway timeout'}
 
         import uvicorn
-        self._log(f"网关启动，监听 {GATEWAY_HOST}:{GATEWAY_PORT} ...")
-        uvicorn.run(self.app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level="error")
-
-if __name__ == "__main__": 
-    TraditionalGateway().run()
+        self._log(f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
+        uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")

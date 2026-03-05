@@ -94,7 +94,7 @@ class OptimizedServer:
     def _push_to_alert_system(self, task_id, task_type, task_priority:str,req_id,timestamp:str,reason:str):
         
             if len(alert_system_token_set) < 1:
-                self._log("WARNING", "推送失败：Redis 中没有找到已注册设备 Token")
+                self._log("WARNING", "推送失败：没有找到已注册设备 Token")
                 return 
             
             for token in alert_system_token_set:
@@ -102,10 +102,6 @@ class OptimizedServer:
                     continue
             
                 message = messaging.Message(
-                    # notification=messaging.Notification(
-                    #     title="分布式系统异常告警",
-                    #     body=f"任务 {task_id} ({task_type}) 发生超时上报，请立即检查！",
-                    # ),
                     data={
                         "request_id": str(req_id),
                         "task_id": task_id,
@@ -144,15 +140,15 @@ class OptimizedServer:
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
-    def _makeup_response(self, task_id: str, task_type: str):
+    def _makeup_response(self):
         response = {}
         # 50% 概率成功，50% 概率失败
         status = 'success' if random.random() > 0.5 else 'failed'
         
         if status == 'success':
-            response['response_data'] = f"success to processing task_id:[{task_id}] - [{task_type}]"
+            response['response_data'] = f"success to processing"
         else:
-            response['response_data'] = f"failed to processing task_id:[{task_id}] - [{task_type}]"
+            response['response_data'] = f"failed to processing"
             
         response['status'] = status
         return response
@@ -178,9 +174,9 @@ class OptimizedServer:
             # =================================================
 
             # 2. 如果是新任务，往下执行业务处理
-            time.sleep(0.05)
+            time.sleep(0.1)
             
-            final_response = self._makeup_response(task_id=task_id, task_type=task_type)
+            final_response = self._makeup_response()
             
             if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
                 redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)

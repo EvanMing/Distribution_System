@@ -12,9 +12,24 @@ PORT = 8000
 LOG_DIR = "logs/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
 
+FAULT_REASON = [
+    "Network issues", 
+    "Server delay", 
+    "API timeout", 
+    "Client-side error", 
+    "Server log storage issue", 
+    "Log format mismatch", 
+    "Permission issue", 
+    "Asynchronous handling issue", 
+    "Server configuration issue", 
+    "Client cache issue"
+]
+
 class TraditionalServer:
-    def __init__(self):
+    def __init__(self,host:str = HOST,port:int = PORT):
         self.app = FastAPI(title="TraditionalServer")
+        self.host = host
+        self.port = port
         os.makedirs(LOG_DIR, exist_ok=True)
 
     def _get_ts(self) -> str: 
@@ -32,28 +47,24 @@ class TraditionalServer:
         async def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             # 模拟识别 ML 任务
             self._log(f"[REQ-{request_id}] 接收请求。TaskID: {task_id}, 任务类型: {task_type}")
-            time.sleep(0.05)
+            time.sleep(0.1)
             self._log(f"[REQ-{request_id}] {task_type} 处理成功，已发出响应。")
             
-            return self._makeup_response(task_type=task_type,task_id=task_id)
+            return self._makeup_response()
             
-        self._log(f"服务端启动，监听 {HOST}:{PORT} ...")
-        uvicorn.run(self.app, host=HOST, port=PORT, log_level="error")
+        self._log(f"服务端启动，监听 {self.host}:{self.port} ...")
+        uvicorn.run(self.app, host=self.host, port=self.port, log_level="error")
 
-    def _makeup_response(self, task_id: str, task_type: str):
+    def _makeup_response(self):
         response = {}
         # 50% 概率成功，50% 概率失败
         status = 'success' if random.random() > 0.5 else 'failed'
         
         if status == 'success':
-            response['response_data'] = f"success to processing task_id:[{task_id}] - [{task_type}]"
+            response['response_data'] = f"success to processing"
         else:
-            response['response_data'] = f"failed to processing task_id:[{task_id}] - [{task_type}]"
+            response['response_data'] = f"failed to processing"
             
         response['status'] = status
-        response['task_id'] = task_id
         
         return response
-    
-if __name__ == "__main__": 
-    TraditionalServer().run()

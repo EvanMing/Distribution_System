@@ -1,33 +1,25 @@
 from fastapi import FastAPI
 import requests
 import time
-import datetime
 import os
 import random
 
-GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
-SERVER_URL = "http://127.0.0.1:8000"
+from common.baseline import DOWNSTREAM_FAULT_PROB, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts
+
 LOG_DIR = "logs/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
 
-UPSTREAM_FAULT_PROB = 0.4
-DOWNSTREAM_FAULT_PROB = 0.2
-TIME_SLEEP = 3.1
-
 class TraditionalGateway:
-    def __init__(self,gateway_host:str = GATEWAY_HOST,gateway_port:int = GATEWAY_PORT,server_url:str = SERVER_URL):
+    
+    def __init__(self,server_url:str,gateway_host:str,gateway_port:int):
         self.app = FastAPI()
         self.gateway_host= gateway_host
         self.gateway_port = gateway_port
         self.server_url = server_url
         os.makedirs(LOG_DIR, exist_ok=True)
 
-    def _get_ts(self) -> str: 
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
     def _log(self, msg: str):
-        # 传统版本：直接追加日志，不限制大小，不做清理
-        log_content = f"[{self._get_ts()}] [TRAD_GATEWAY] {msg}\n"
+        log_content = f"[{get_ts()}] [TRAD_GATEWAY] {msg}\n"
         with open(LOG_FILE, "a", encoding="utf-8") as f: 
             f.write(log_content)
         print(log_content.strip())
@@ -58,3 +50,5 @@ class TraditionalGateway:
         import uvicorn
         self._log(f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
+        
+        

@@ -2,15 +2,15 @@ import random
 import requests, time, datetime, os
 import sys
 
-GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
+from common.baseline import GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, get_host, get_ts
+
 LOG_DIR, RESULT_DIR = "logs/traditional", "experiment_results/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
-REQUEST_TIMEOUT = 3.0
-REQUEST_TIMES = 30
-ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
 
 class TraditionalClient:
-    def __init__(self,gateway_host:str = GATEWAY_HOST, gateway_port:int = GATEWAY_PORT):
+    
+    def __init__(self,gateway_host:str, gateway_port:int ):
+        
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.gateway_url = f'http://{self.gateway_host}:{self.gateway_port}'
@@ -25,10 +25,8 @@ class TraditionalClient:
         
         for d in [LOG_DIR, RESULT_DIR]: os.makedirs(d, exist_ok=True)
         
-    def _get_ts(self) -> str: return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
     def _log(self, msg: str):
-        log_content = f"[{self._get_ts()}] [TRAD_CLIENT] {msg}\n"
+        log_content = f"[{get_ts()}] [TRAD_CLIENT] {msg}\n"
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
         
@@ -82,7 +80,7 @@ class TraditionalClient:
         
         report = f"""==================================================
 DISTRIBUTED ML SYSTEM - TRADITIONAL MODE REPORT
-Generated: {self._get_ts()}
+Generated: {get_ts()}
 ==================================================
 [SYSTEM CONFIGURATION]
   Gateway Address          : {self.gateway_url}
@@ -108,4 +106,4 @@ Generated: {self._get_ts()}
         self._log(f"实验报告已生成: {RESULT_DIR}/result.txt")
 
 if __name__ == "__main__": 
-    TraditionalClient(gateway_host='127.0.0.1', gateway_port=8080).run()
+    TraditionalClient(gateway_host=get_host(), gateway_port=GATEWAY_PORT).run()

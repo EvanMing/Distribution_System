@@ -1,8 +1,8 @@
 import random
-import requests, time, datetime, os
+import requests, time, os
 import sys
 
-from common.baseline import DOWNSTREAM_FAULT_PROB, GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_host, get_ts
+from common.baseline import DOWNSTREAM_FAULT_PROB, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
 
 LOG_DIR, RESULT_DIR = "logs/traditional", "experiment_results/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
@@ -106,5 +106,3 @@ Generated: {get_ts()}
         with open(f"{RESULT_DIR}/result.txt", "w", encoding="utf-8") as f: f.write(report)
         self._log(f"实验报告已生成: {RESULT_DIR}/result.txt")
 
-if __name__ == "__main__": 
-    TraditionalClient(gateway_host=get_host(), gateway_port=GATEWAY_PORT).run()

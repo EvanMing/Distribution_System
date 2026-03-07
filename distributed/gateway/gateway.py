@@ -13,18 +13,17 @@ import requests
 from fastapi import FastAPI, Body
 from contextlib import closing
 import os
-from dotenv import load_dotenv
 
 # 引入数据库连接池
 from dbutils.pooled_db import PooledDB
 
-from common.baseline import ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, RDS_PORT, RDS_USER, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts 
+from common.baseline import ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, LOCAL_HOST, MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, RDS_PORT, RDS_USER, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts 
 
-LOG_DIR = "logs/optimized"
+LOG_DIR = "logs/distributed"
 LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
 MAX_LOG_SIZE = 50 * 1024 * 1024
 
-class OptimizedGateway:
+class DistributedGateway:
     
     def __init__(self, gateway_host:str, gateway_port:int, server_url:str):
         self.app = FastAPI()
@@ -40,8 +39,8 @@ class OptimizedGateway:
         self._init_db()
         # 3. 初始化时清空脏数据（你之前加的需求）
         # self._clear_cache_table()
-        
-        self._export_cache_to_csv()
+        if LOCAL_HOST in self.gateway_host:
+            self._export_cache_to_csv()
 
     def _clean_log(self):
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:

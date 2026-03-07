@@ -1,17 +1,17 @@
-import requests, time, datetime, os, json, threading, random
+import requests, time, os, json, threading, random
 import sys
 
 from requests.adapters import HTTPAdapter
 
-from common.baseline import CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_host, get_ts
-from optimized.client.LoggedRetry import LoggedRetry
+from common.baseline import CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from distributed.client.LoggedRetry import LoggedRetry
 
-LOG_DIR, RESULT_DIR = "logs/optimized", "experiment_results/optimized"
+LOG_DIR, RESULT_DIR = "logs/distributed", "experiment_results/distributed"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
 QUEUE_FILE = os.path.join(LOG_DIR, "fault_queue.json")
 MAX_LOG_SIZE = 20 * 1024 * 1024
 
-class OptimizedClient:
+class DistributedClient:
     
     def __init__(self, gateway_host:str, gateway_port:int):
         self.gateway_host = gateway_host
@@ -91,7 +91,7 @@ class OptimizedClient:
         total_overhead_kb = round((self.total_bytes_sent + self.total_bytes_received) / 1024, 2)
         
         report = f"""==================================================
-DISTRIBUTED ML SYSTEM - OPTIMIZED MODE REPORT
+DISTRIBUTED ML SYSTEM - DISTRIBUTED MODE REPORT
 Generated: {get_ts()}
 ==================================================
 [SYSTEM CONFIGURATION]
@@ -207,7 +207,4 @@ Generated: {get_ts()}
         session.mount("https://", adapter)
         
         return session
-    
-if __name__ == "__main__": 
-    OptimizedClient(gateway_host=get_host(), gateway_port=GATEWAY_PORT).run()
     

@@ -9,10 +9,11 @@ experiment_results/
 
 # Python 缓存与环境
 __pycache__/
-optimized/__pycache__/
-optimized/client/__pycache__/
-optimized/gateway/__pycache__/
-optimized/server/__pycache__/
+
+distributed/__pycache__/
+distributed/client/__pycache__/
+distributed/gateway/__pycache__/
+distributed/server/__pycache__/
 
 traditional/__pycache__/
 traditional/client/__pycache__/

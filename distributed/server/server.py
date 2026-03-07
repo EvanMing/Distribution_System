@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 from fastapi import FastAPI, Body
 import time, os, json
 from typing import Dict, Any, Optional, Set
@@ -11,7 +10,7 @@ from firebase_admin import credentials, messaging
 
 from common.baseline import ACTIVE_REDIS_HOST, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, get_ts, makeup_response
 
-LOG_DIR = "logs/optimized"
+LOG_DIR = "logs/distributed"
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
 MAX_LOG_SIZE = 100 * 1024 * 1024
 
@@ -28,7 +27,7 @@ redis_client = redis.Redis(
 
 IS_REDIS_CONNECTED = False
 
-class OptimizedServer:
+class DistributedServer:
     
     def __init__(self,host:str ,port:int):
         self.app = FastAPI()

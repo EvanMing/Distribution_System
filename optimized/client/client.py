@@ -1,15 +1,26 @@
 import requests, time, datetime, os, json, threading, random
 import sys
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from optimized.client.LoggedRetry import LoggedRetry
+
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 LOG_DIR, RESULT_DIR = "logs/optimized", "experiment_results/optimized"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
 QUEUE_FILE = os.path.join(LOG_DIR, "fault_queue.json")
 MAX_LOG_SIZE = 20 * 1024 * 1024
 
+# ================= requests 配置 =================
+
+CONNECT_TIMEOUT = 2.0
 REQUEST_TIMEOUT = 5.0
+RETRY_TIMES = 2
 REQUEST_TIMES = 30
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference", "Model_Deployment"]
+
+# =================================================
 
 class OptimizedClient:
     def __init__(self, gateway_host:str = GATEWAY_HOST, gateway_port:int = GATEWAY_PORT):
@@ -22,6 +33,7 @@ class OptimizedClient:
         self.total_bytes_sent = 0          # 网络开销：发送字节数
         self.total_bytes_received = 0      # 网络开销：接收字节数
         self.server_cache_hits = 0         # 服务端 Valkey 缓存命中数
+        self.retried_requests = set()             # 记录总计触发的底层重试次数
         self.gateway_degrade_hits = 0      # 网关 RDS 降级命中数
         self.experiment_start_time = 0     # 主循环开始时间
         self.experiment_end_time = 0       # 主循环结束时间
@@ -81,7 +93,7 @@ class OptimizedClient:
                             q.append(failed_task)
                             with open(QUEUE_FILE, "w") as f: json.dump(q, f)
             except Exception as e:
-                pass
+                self._log('WARNING', f"{e}")
             time.sleep(2.0)
 
     def _save_result(self):
@@ -101,12 +113,14 @@ Generated: {self._get_ts()}
   Simulated Tasks          : [{", ".join(ML_TASK_TYPES)}]
   Mimic Fault Config       : Upstream (40%) + Downstream (20%)
   Server Handler Per Task  : 0.1s
+  client retry config      : {RETRY_TIMES}
 ==================================================
 [RELIABILITY METRICS]
-  Total Sent      : {REQUEST_TIMES}
-  Direct Success  : {self.success}
-  Failed / Dropped: {self.failed}
-  Response Rate   : {response_rate}%
+  Total Sent        : {REQUEST_TIMES}
+  Direct Success    : {self.success}
+  Failed / Dropped  : {self.failed}
+  Auto Retries      : {len(self.retried_requests)}
+  Response Rate     : {response_rate}%
 --------------------------------------------------
 [CACHE PERFORMANCE]
   Server Valkey Hits : {self.server_cache_hits} (Idempotency)
@@ -125,6 +139,8 @@ Generated: {self._get_ts()}
         self._log('EXPERIMENT', f"开始模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
         self.experiment_start_time = time.time() # 记录主循环开始时间
         
+        session = self._create_session_with_retries()
+        
         for i in range(REQUEST_TIMES):
             req_id = f"{i+1:03d}"
             task_type = random.choice(ML_TASK_TYPES)
@@ -139,7 +155,16 @@ Generated: {self._get_ts()}
             req_start_time = time.time() 
             
             try:
-                res = requests.get(f"{self.gateway_url}/api/forward", params=params, timeout=REQUEST_TIMEOUT)
+                res = session.get(
+                f"{self.gateway_url}/api/forward", 
+                params=params, 
+                # 前一个数字是 连接超时（握手），后一个是 读取超时（等待处理）。
+                timeout=(CONNECT_TIMEOUT, REQUEST_TIMEOUT)
+                )
+                
+                # 只有拿到响应（即使是 Retry 之后的）才进入这里
+                res.raise_for_status() # 触发非200状态码的异常
+                
                 req_end_time = time.time() 
                 
                 # 仅统计来自网关的主业务响应大小
@@ -159,7 +184,7 @@ Generated: {self._get_ts()}
                     
                     self._log("SUCCESS", f'[REQ-{req_id}] - [{task_id} - {task_type}] 成功收到响应: ({response_data}) 耗时 {round(req_end_time - req_start_time, 2)}s, server_cache: {server_note if server_note else "No"}, gateway_cache: {gateway_note if gateway_note else "No"}')
                     
-            except requests.exceptions.Timeout:
+            except requests.exceptions.RequestException:
                 self._log("ERROR", f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）。上报服务端！")
                 self.failed += 1
                 self._enqueue(req_id, task_id, task_type, self._get_ts())
@@ -172,5 +197,28 @@ Generated: {self._get_ts()}
         self.running = False
         self._save_result()
 
+    def _create_session_with_retries(
+        self,
+        retries=RETRY_TIMES,
+        backoff_factor=0.3,
+        status_forcelist=(500, 502, 504)
+    ):
+        session = requests.Session()
+        
+        retry_strategy = LoggedRetry(
+            total=retries,
+            read=retries,
+            connect=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=status_forcelist,
+            client=self  
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        return session
+    
 if __name__ == "__main__": 
     OptimizedClient(gateway_host='127.0.0.1', gateway_port=8080).run()

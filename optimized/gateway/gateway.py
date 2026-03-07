@@ -30,6 +30,7 @@ ATTEMPT_TIMES = 3
 
 UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
+TIME_SLEEP = 3.1
 
 # ================= AWS RDS MySQL 配置 =================
 
@@ -268,7 +269,7 @@ class OptimizedGateway:
                 
             if random.random() < DOWNSTREAM_FAULT_PROB:
                 self._log("FAULT", f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
-                time.sleep(5.1)
+                time.sleep(TIME_SLEEP)
                 
             return success_response
 

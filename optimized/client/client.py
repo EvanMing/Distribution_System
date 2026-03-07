@@ -15,7 +15,7 @@ MAX_LOG_SIZE = 20 * 1024 * 1024
 # ================= requests 配置 =================
 
 CONNECT_TIMEOUT = 2.0
-REQUEST_TIMEOUT = 5.0
+REQUEST_TIMEOUT = 3.0
 RETRY_TIMES = 2
 REQUEST_TIMES = 30
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference", "Model_Deployment"]

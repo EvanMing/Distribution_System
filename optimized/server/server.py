@@ -69,6 +69,7 @@ IS_REDIS_CONNECTED = False
 FIREBASE_CERT_PATH = os.getenv('FIREBASE_CERT_PATH', 'serviceAccountKey.json')
 
 class OptimizedServer:
+    
     def __init__(self,host:str = HOST,port:int=PORT):
         self.app = FastAPI()
         os.makedirs(LOG_DIR, exist_ok=True)

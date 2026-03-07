@@ -5,7 +5,7 @@ import sys
 GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 LOG_DIR, RESULT_DIR = "logs/traditional", "experiment_results/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
-REQUEST_TIMEOUT = 5.0
+REQUEST_TIMEOUT = 3.0
 REQUEST_TIMES = 30
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
 

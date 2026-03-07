@@ -12,6 +12,7 @@ LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
 
 UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
+TIME_SLEEP = 3.1
 
 class TraditionalGateway:
     def __init__(self,gateway_host:str = GATEWAY_HOST,gateway_port:int = GATEWAY_PORT,server_url:str = SERVER_URL):
@@ -43,11 +44,11 @@ class TraditionalGateway:
 
                 if random.random() < UPSTREAM_FAULT_PROB:
                     self._log(f"[REQ-{request_id}] [FAULT] 模拟上游网络丢包。无重试，直接失败。")
-                    time.sleep(5.1) 
+                    time.sleep(TIME_SLEEP) 
 
                 if random.random() < DOWNSTREAM_FAULT_PROB:
                     self._log(f"[REQ-{request_id}] [FAULT] 模拟下游网络丢包，客户端超时。")
-                    time.sleep(5.1) 
+                    time.sleep(TIME_SLEEP) 
 
                 return result
             except Exception as e:

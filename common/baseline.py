@@ -32,7 +32,7 @@ FAULT_LEVEL=[
     'emergency','high','medium','low'
 ]
 
-TASK_COST = 0.1
+TASK_COST = 0.2
 
 #-----------------------------server---------------------
 
@@ -42,19 +42,21 @@ TASK_COST = 0.1
 UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
 TIME_SLEEP = 3.1
-
+RESPIRED_TIME = 0.2
+GATEWAY_FORWARD_RESPONSE_TIMEOUT = 2
 GATEWAY_PORT =  8080
 SERVER_URL = f"http://{LOCAL_HOST}:{SERVER_PORT}"
 
 #-----------------------------gateway--------------------
 
-
 #-----------------------------client---------------------
 
 REQUEST_TIMEOUT = 3.0
 CONNECT_TIMEOUT = 2.0
-RETRY_TIMES = 0
+BACKOFF_FACTOR = 0.3
+MAX_WORKERS = 5
 REQUEST_TIMES = 30
+RETRY_TIMES = 1
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
 
 #-----------------------------client---------------------

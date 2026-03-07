@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import datetime
@@ -6,6 +7,7 @@ import json
 from typing import Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pandas as pd
 import pymysql
 import pymysql.cursors
@@ -13,24 +15,27 @@ import requests
 from fastapi import FastAPI, Body
 from contextlib import closing
 import os
+import uvicorn
 
 # 引入数据库连接池
 from dbutils.pooled_db import PooledDB
 
-from common.baseline import ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, LOCAL_HOST, MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, RDS_PORT, RDS_USER, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts 
+from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, GATEWAY_FORWARD_RESPONSE_TIMEOUT, LOCAL_HOST, 
+                             MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, 
+                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts )
+from common.logger_config import setup_logger
 
-LOG_DIR = "logs/distributed"
-LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
-MAX_LOG_SIZE = 50 * 1024 * 1024
+LOG_PATH = "logs/distributed/gateway.log"
 
 class DistributedGateway:
     
     def __init__(self, gateway_host:str, gateway_port:int, server_url:str):
+        # 初始化日志
+        self.logger = setup_logger("GATEWAY", log_file = LOG_PATH, max_bytes = 50*1024*1024)
         self.app = FastAPI()
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.server_url = server_url
-        os.makedirs(LOG_DIR, exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=10)
         
         # 1. 优先初始化数据库连接池
@@ -39,22 +44,19 @@ class DistributedGateway:
         self._init_db()
         # 3. 初始化时清空脏数据（你之前加的需求）
         # self._clear_cache_table()
-        if LOCAL_HOST in self.gateway_host:
-            self._export_cache_to_csv()
+        # if LOCAL_HOST in self.gateway_host:
+        #     self._export_cache_to_csv()
+        
+        # 使用异步 HTTP 客户端
+        self.client = httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
 
-    def _clean_log(self):
-        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
-            with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
-            reserve = int(len(lines) * 2 / 3)
-            with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{get_ts()}] [OPT_GATEWAY] [LOG_CLEAN] 日志达50M上限，清理最早1/3\n")
-                f.writelines(lines[-reserve:] if reserve > 0 else [])
-
-    def _log(self, level: str, msg: str):
-        self._clean_log()
-        log_content = f"[{get_ts()}] [OPT_GATEWAY] [{level}] {msg}\n"
-        with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
-        print(log_content.strip())
+    def _log(self, level, msg):
+        if level.upper() == "INFO": self.logger.info(msg)
+        elif level.upper() == "ERROR": self.logger.error(msg)
+        elif level.upper() == "WARNING": self.logger.warning(msg)
+        else: self.logger.info(f"[{level}] {msg}")
 
 # ================= AWS RDS (MySQL) 操作优化 =================
 
@@ -219,20 +221,21 @@ class DistributedGateway:
             while attempt < ATTEMPT_TIMES:
                 attempt += 1
                 try:
-                    res = requests.get(f"{self.server_url}/api/process", params=params, timeout=2.0)
+                    res = await self.client.get(f"{self.server_url}/api/process", params=params, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
                     self._log("SUCCESS", f"[REQ-{request_id}] [第 {attempt} 次尝试]")
                     
                     if random.random() < UPSTREAM_FAULT_PROB:
                         self._log("WARNING", f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
-                        raise requests.exceptions.Timeout("Simulated upstream loss")
+                        raise httpx.TimeoutException("Simulated upstream loss") # 抛出 httpx 的超时异常
                     
                     success_response = res.json()
-                    self._save_to_cache(task_type=task_type, task_id=task_id, response=success_response)
+                    cached_data = await asyncio.get_event_loop().run_in_executor(
+                                        self.executor, self._get_from_cache, task_type, task_id)
                     self._log("SUCCESS", "成功拿到服务端响应。")
                     break
-                except Exception as _:
-                    self._log("RETRY", f"[REQ-{request_id}] [第 {attempt} 次尝试] 获取响应失败，重试中...")
-                    time.sleep(0.2)
+                except Exception as e:
+                    self._log("RETRY", f"[REQ-{request_id}] [第 {attempt} 次尝试] 获取响应失败，原因: {e}，重试中...")
+                    await asyncio.sleep(RESPIRED_TIME)
             
             # 如果重试耗尽，从 AWS RDS 捞取降级缓存
             if not success_response:
@@ -250,15 +253,16 @@ class DistributedGateway:
                 
             if random.random() < DOWNSTREAM_FAULT_PROB:
                 self._log("FAULT", f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
-                time.sleep(TIME_SLEEP)
+                await asyncio.sleep(TIME_SLEEP)
                 
             return success_response
 
+        # FastAPI 有一个机制：如果接口声明为 def（没有 async），它会自动把它扔进后台线程池运行，
+        # 绝不会阻塞主事件循环。既然你用了同步的 requests.post，就要去掉 async。
         @self.app.post("/api/report")
-        async def report(payload: Dict[str, Any] = Body(...)):
+        def report(payload: Dict[str, Any] = Body(...)):
             return requests.post(f"{self.server_url}/api/report_fault", json=payload).json()
 
-        import uvicorn
         self._log("START", f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
         

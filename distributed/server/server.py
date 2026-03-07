@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI, Body
 import time, os, json
 from typing import Dict, Any, Optional, Set
@@ -9,10 +11,9 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 
 from common.baseline import ACTIVE_REDIS_HOST, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, get_ts, makeup_response
+from common.logger_config import setup_logger
 
-LOG_DIR = "logs/distributed"
-LOG_FILE = os.path.join(LOG_DIR, "server.log")
-MAX_LOG_SIZE = 100 * 1024 * 1024
+LOG_PATH = "logs/distributed/server.log"
 
 alert_system_token_set: Optional[Set[str]] = set()
 
@@ -30,8 +31,9 @@ IS_REDIS_CONNECTED = False
 class DistributedServer:
     
     def __init__(self,host:str ,port:int):
+        # 初始化日志
+        self.logger = setup_logger("SERVER", log_file = LOG_PATH, max_bytes = 100*1024*1024)
         self.app = FastAPI()
-        os.makedirs(LOG_DIR, exist_ok=True)
         self._init_redis()
         self.host = host
         self.port = port
@@ -87,19 +89,11 @@ class DistributedServer:
                 except Exception as e:
                     self._log("WARNING", f"推送失败: {e}")
 
-    def _clean_log(self):
-        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
-            with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
-            reserve = int(len(lines) * 2 / 3)
-            with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{get_ts()}] [OPT_SERVER] [LOG_CLEAN] 日志达100M上限，清理最早1/3\n")
-                f.writelines(lines[-reserve:] if reserve > 0 else [])
-
-    def _log(self, level: str, msg: str):
-        self._clean_log()
-        log_content = f"[{get_ts()}] [OPT_SERVER] [{level}] {msg}\n"
-        with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
-        print(log_content.strip())
+    def _log(self, level, msg):
+        if level.upper() == "INFO": self.logger.info(msg)
+        elif level.upper() == "ERROR": self.logger.error(msg)
+        elif level.upper() == "WARNING": self.logger.warning(msg)
+        else: self.logger.info(f"[{level}] {msg}")
 
     def run(self):
         
@@ -123,7 +117,8 @@ class DistributedServer:
             # =================================================
 
             # 2. 如果是新任务，往下执行业务处理
-            time.sleep(TASK_COST)
+            # 将同步阻塞替换为异步非阻塞
+            await asyncio.sleep(TASK_COST)
             
             final_response = makeup_response(task_type=task_type)
             
@@ -134,7 +129,7 @@ class DistributedServer:
             return final_response
 
         @self.app.post("/api/report_fault")
-        async def report_fault(payload: Dict[str, Any] = Body(...)):
+        def report_fault(payload: Dict[str, Any] = Body(...)):
             req_id = payload.get("request_id")
             task_id = payload.get("task_id", "unknown")
             task_type = payload.get("task_type", "unknown")
@@ -157,7 +152,7 @@ class DistributedServer:
                 return {"status": "success", 'outcome':1, 'explaination':'Awaiting resolution'}
             
         @self.app.post("/api/register_device")
-        async def register_device(payload: Dict[str, Any] = Body(...)):
+        def register_device(payload: Dict[str, Any] = Body(...)):
             token = payload.get("token")
             if token:
                 alert_system_token_set.add(token)

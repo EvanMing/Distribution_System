@@ -1,19 +1,24 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests, time, os, json, threading, random
 import sys
 
 from requests.adapters import HTTPAdapter
 
-from common.baseline import CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from common.baseline import BACKOFF_FACTOR, CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from common.logger_config import setup_logger
+from distributed.client.RequestResult import RequestResult
 from distributed.client.LoggedRetry import LoggedRetry
 
 LOG_DIR, RESULT_DIR = "logs/distributed", "experiment_results/distributed"
-LOG_FILE = os.path.join(LOG_DIR, "client.log")
+LOG_PATH = f"{LOG_DIR}/client.log"
 QUEUE_FILE = os.path.join(LOG_DIR, "fault_queue.json")
-MAX_LOG_SIZE = 20 * 1024 * 1024
 
 class DistributedClient:
     
     def __init__(self, gateway_host:str, gateway_port:int):
+        # 初始化日志
+        self.logger = setup_logger("CLIENT", log_file = LOG_PATH ,max_bytes = 20*1024*1024)
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.gateway_url = f'http://{self.gateway_host}:{self.gateway_port}'
@@ -32,23 +37,15 @@ class DistributedClient:
         for d in [LOG_DIR, RESULT_DIR]: os.makedirs(d, exist_ok=True)
         if not os.path.exists(QUEUE_FILE):
             with open(QUEUE_FILE, "w") as f: json.dump([], f)
-            
+        
         self.running = True
         threading.Thread(target=self._async_worker, daemon=True).start()
 
-    def _clean_log(self):
-        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
-            with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
-            reserve = int(len(lines) * 2 / 3)
-            with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{get_ts()}] [OPT_CLIENT] [LOG_CLEAN] 日志达20M上限，清理最早1/3\n")
-                f.writelines(lines[-reserve:] if reserve > 0 else [])
-
-    def _log(self, level: str, msg: str):
-        self._clean_log()
-        log_content = f"[{get_ts()}] [OPT_CLIENT] [{level}] {msg}\n"
-        with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
-        print(log_content.strip())
+    def _log(self, level, msg):
+        if level.upper() == "INFO": self.logger.info(msg)
+        elif level.upper() == "ERROR": self.logger.error(msg)
+        elif level.upper() == "WARNING": self.logger.warning(msg)
+        else: self.logger.info(f"[{level}] {msg}")
 
     def _enqueue(self, req_id: str, task_id:str, task_type: str, timestamp:str):
         with open(QUEUE_FILE, "r") as f: q = json.load(f)
@@ -123,72 +120,52 @@ Generated: {get_ts()}
         with open(f"{RESULT_DIR}/result.txt", "w", encoding="utf-8") as f: f.write(report)
         self._log("EXPERIMENT", f"实验报告已生成: {RESULT_DIR}/result.txt\n")
 
-    def run(self):
-        self._log('EXPERIMENT', f"开始模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
-        self.experiment_start_time = time.time() # 记录主循环开始时间
+    def _send_single_request(self, i, session) -> RequestResult:
+        req_id = f"{i+1:03d}"
+        task_type = random.choice(ML_TASK_TYPES)
+        task_id = f"ML-{task_type[:4].upper()}-{random.randint(1, int(REQUEST_TIMES))}"
+        params = {"request_id": req_id, "task_id": task_id, "task_type": task_type}
         
-        session = self._create_session_with_retries()
+        # 估算发送大小
+        req_size = sys.getsizeof(self.gateway_url) + sys.getsizeof(str(params))
+        req_start_time = time.time() 
         
-        for i in range(REQUEST_TIMES):
-            req_id = f"{i+1:03d}"
-            task_type = random.choice(ML_TASK_TYPES)
-            task_id = f"ML-{task_type[:4].upper()}-{random.randint(1, int(REQUEST_TIMES))}"
-            
-            params = {"request_id": req_id, "task_id": task_id, "task_type": task_type}
-            
-            # 仅统计发送给网关的主业务请求大小
-            req_size = sys.getsizeof(self.gateway_url) + sys.getsizeof(str(params))
-            self.total_bytes_sent += req_size
-            
-            req_start_time = time.time() 
-            
-            try:
-                res = session.get(
+        try:
+            res = session.get(
                 f"{self.gateway_url}/api/forward", 
                 params=params, 
-                # 前一个数字是 连接超时（握手），后一个是 读取超时（等待处理）。
                 timeout=(CONNECT_TIMEOUT, REQUEST_TIMEOUT)
-                )
-                
-                # 只有拿到响应（即使是 Retry 之后的）才进入这里
-                res.raise_for_status() # 触发非200状态码的异常
-                
-                req_end_time = time.time() 
-                
-                # 仅统计来自网关的主业务响应大小
-                self.total_bytes_received += len(res.content)
-                
-                json_res = res.json()
-                response_data = json_res.get('response_data')
-                server_note = json_res.get('server_note')
-                gateway_note = json_res.get('gateway_note')
-                
-                if res.status_code == 200:
-                    self.latencies.append(req_end_time - req_start_time)
-                    self.success += 1
-                    
-                    if server_note: self.server_cache_hits += 1
-                    if gateway_note: self.gateway_degrade_hits += 1
-                    
-                    self._log("SUCCESS", f'[REQ-{req_id}] - [{task_id} - {task_type}] 成功收到响应: ({response_data}) 耗时 {round(req_end_time - req_start_time, 2)}s, server_cache: {server_note if server_note else "No"}, gateway_cache: {gateway_note if gateway_note else "No"}')
-                    
-            except requests.exceptions.RequestException:
-                self._log("ERROR", f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）。上报服务端！")
-                self.failed += 1
-                self._enqueue(req_id, task_id, task_type, get_ts())
-                
-            time.sleep(0.5)
-
-        self.experiment_end_time = time.time() # 记录主循环结束时间（放在休眠前）
-        
-        time.sleep(8.0) # 等待队列处理完毕
-        self.running = False
-        self._save_result()
+            )
+            res.raise_for_status() 
+            latency = time.time() - req_start_time
+            
+            return RequestResult(
+                is_success=True,
+                req_size=req_size,
+                res_size=len(res.content),
+                latency=latency,
+                json_res=res.json(),
+                req_id=req_id,
+                task_id=task_id,
+                task_type=task_type
+            )
+            
+        except requests.exceptions.RequestException:
+            return RequestResult(
+                is_success=False,
+                req_size=req_size,
+                res_size=0,
+                latency=0.0,
+                json_res=None,
+                req_id=req_id,
+                task_id=task_id,
+                task_type=task_type
+            )
 
     def _create_session_with_retries(
         self,
         retries=RETRY_TIMES,
-        backoff_factor=0.3,
+        backoff_factor=BACKOFF_FACTOR,
         status_forcelist=(500, 502, 504)
     ):
         session = requests.Session()
@@ -202,9 +179,55 @@ Generated: {get_ts()}
             client=self  
         )
         
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # pool_connections: 缓存的连接池数量
+        # pool_maxsize: 连接池中最多保存的连接数
+        # 将它们设置为与你的 max_workers 一致，可以避免创建多余的底层 TCP 连接
+        adapter = HTTPAdapter(
+            max_retries = retry_strategy,
+            pool_connections = MAX_WORKERS,  
+            pool_maxsize = MAX_WORKERS       
+        )
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
         return session
     
+    def run(self):
+        self._log('EXPERIMENT', f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
+        self.experiment_start_time = time.time() 
+        
+        session = self._create_session_with_retries()
+        
+        # 使用线程池并发发送请求
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # 提交所有任务
+            futures = [executor.submit(self._send_single_request, i, session) for i in range(REQUEST_TIMES)]
+            
+            # 等待结果并统计
+            for future in as_completed(futures):
+                result: RequestResult = future.result()
+                
+                self.total_bytes_sent += result.req_size
+                self.total_bytes_received += result.res_size
+                
+                if result.is_success:
+                    self.latencies.append(result.latency)
+                    self.success += 1
+                    
+                    response_data = result.json_res.get('response_data')
+                    server_note = result.json_res.get('server_note')
+                    gateway_note = result.json_res.get('gateway_note')
+                    
+                    if server_note: self.server_cache_hits += 1
+                    if gateway_note: self.gateway_degrade_hits += 1
+                    
+                    self._log("SUCCESS", f'[REQ-{result.req_id}] 成功收到响应: ({response_data}) 耗时 {round(result.latency, 2)}s, server_cache: {server_note if server_note else "No"}, gateway_cache: {gateway_note if gateway_note else "No"}')
+                else:
+                    self._log("ERROR", f"[REQ-{result.req_id}] 请求超时（未收到响应）。上报服务端！")
+                    self.failed += 1
+                    self._enqueue(result.req_id, result.task_id, result.task_type, get_ts())
+
+        self.experiment_end_time = time.time()
+        time.sleep(8.0) 
+        self.running = False
+        self._save_result()

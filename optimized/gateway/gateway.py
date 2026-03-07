@@ -16,35 +16,17 @@ import os
 from dotenv import load_dotenv
 
 # 引入数据库连接池
-from dbutils.pooled_db import PooledDB 
+from dbutils.pooled_db import PooledDB
 
-load_dotenv()
+from common.baseline import ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, RDS_PORT, RDS_USER, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts 
 
-GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
-SERVER_URL = "http://127.0.0.1:8000"
 LOG_DIR = "logs/optimized"
 LOG_FILE = os.path.join(LOG_DIR, "gateway.log")
 MAX_LOG_SIZE = 50 * 1024 * 1024
-MAX_CACHE_SIZE = 1000  # 网关降级库最大缓存条数
-ATTEMPT_TIMES = 3
-
-UPSTREAM_FAULT_PROB = 0.4
-DOWNSTREAM_FAULT_PROB = 0.2
-TIME_SLEEP = 3.1
-
-# ================= AWS RDS MySQL 配置 =================
-
-RDS_HOST = os.getenv('RDS_HOST', 'localhost')
-RDS_USER = os.getenv('RDS_USER', 'root')
-RDS_PASSWORD = os.getenv('RDS_PASSWORD')  # 找不到会返回 None
-RDS_DB_NAME = os.getenv('RDS_DB_NAME', 'gatewaycache')
-RDS_DB_TABLE = 'task_cache'
-RDS_PORT = 3306 
-
-# =====================================================
 
 class OptimizedGateway:
-    def __init__(self, gateway_host:str=GATEWAY_HOST, gateway_port:int=GATEWAY_PORT, server_url:str = SERVER_URL):
+    
+    def __init__(self, gateway_host:str, gateway_port:int, server_url:str):
         self.app = FastAPI()
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
@@ -58,21 +40,20 @@ class OptimizedGateway:
         self._init_db()
         # 3. 初始化时清空脏数据（你之前加的需求）
         # self._clear_cache_table()
+        
         self._export_cache_to_csv()
-
-    def _get_ts(self) -> str: return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
     def _clean_log(self):
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
             with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
             reserve = int(len(lines) * 2 / 3)
             with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{self._get_ts()}] [OPT_GATEWAY] [LOG_CLEAN] 日志达50M上限，清理最早1/3\n")
+                f.write(f"[{get_ts()}] [OPT_GATEWAY] [LOG_CLEAN] 日志达50M上限，清理最早1/3\n")
                 f.writelines(lines[-reserve:] if reserve > 0 else [])
 
     def _log(self, level: str, msg: str):
         self._clean_log()
-        log_content = f"[{self._get_ts()}] [OPT_GATEWAY] [{level}] {msg}\n"
+        log_content = f"[{get_ts()}] [OPT_GATEWAY] [{level}] {msg}\n"
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
@@ -229,6 +210,7 @@ class OptimizedGateway:
 # ========================================================
 
     def run(self):
+        
         @self.app.get("/api/forward")
         async def forward(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             attempt = 0
@@ -280,3 +262,5 @@ class OptimizedGateway:
         import uvicorn
         self._log("START", f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
+        
+        

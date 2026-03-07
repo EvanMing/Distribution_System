@@ -19,8 +19,6 @@ traditional/client/__pycache__/
 traditional/gateway/__pycache__/
 traditional/server/__pycache__/
 
-optimized/.env
-
 .venv/
 *.pyc
 

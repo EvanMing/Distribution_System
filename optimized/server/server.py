@@ -1,5 +1,6 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI, Body
-import time, datetime, os, json
+import time, os, json
 from typing import Dict, Any, Optional, Set
 import redis
 import random
@@ -8,51 +9,13 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-import os
-from dotenv import load_dotenv
+from common.baseline import ACTIVE_REDIS_HOST, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, get_ts, makeup_response
 
-load_dotenv()
-
-HOST, PORT = "127.0.0.1", 8000
 LOG_DIR = "logs/optimized"
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
 MAX_LOG_SIZE = 100 * 1024 * 1024
 
 alert_system_token_set: Optional[Set[str]] = set()
-
-FAULT_REASON = [
-    "Network issues", 
-    "Server delay", 
-    "API timeout", 
-    "Client-side error", 
-    "Server log storage issue", 
-    "Log format mismatch", 
-    "Permission issue", 
-    "Asynchronous handling issue", 
-    "Server configuration issue", 
-    "Client cache issue"
-]
-
-FAULT_LEVEL=[
-    'emergency','high','medium','low'
-]
-
-# ================= Valkey (Redis 兼容) 配置 =================
-
-IDEMPOTENCY_EXPIRE = 86400  # 幂等记录保留 24 小时
-VALKEY_ENDPOINT = os.getenv('VALKEY_ENDPOINT', 'localhost')
-# VALKEY_ENDPOINT = 'com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazonaws.com'
-REDIS_PORT = 6379
-
-# 逻辑判断：如果在 EC2 环境则连云端，本地则连隧道映射的 localhost
-def get_redis_host():
-    import socket
-    
-    if "laptop" in socket.gethostname().lower():
-        return "127.0.0.1"
-    return VALKEY_ENDPOINT
-
-ACTIVE_REDIS_HOST = get_redis_host()
 
 # 初始化 Redis 连接池
 redis_client = redis.Redis(
@@ -64,13 +27,10 @@ redis_client = redis.Redis(
 )
 
 IS_REDIS_CONNECTED = False
-# ==========================================================
-
-FIREBASE_CERT_PATH = os.getenv('FIREBASE_CERT_PATH', 'serviceAccountKey.json')
 
 class OptimizedServer:
     
-    def __init__(self,host:str = HOST,port:int=PORT):
+    def __init__(self,host:str ,port:int):
         self.app = FastAPI()
         os.makedirs(LOG_DIR, exist_ok=True)
         self._init_redis()
@@ -128,51 +88,22 @@ class OptimizedServer:
                 except Exception as e:
                     self._log("WARNING", f"推送失败: {e}")
 
-    def _get_ts(self) -> str: 
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
     def _clean_log(self):
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
             with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
             reserve = int(len(lines) * 2 / 3)
             with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{self._get_ts()}] [OPT_SERVER] [LOG_CLEAN] 日志达100M上限，清理最早1/3\n")
+                f.write(f"[{get_ts()}] [OPT_SERVER] [LOG_CLEAN] 日志达100M上限，清理最早1/3\n")
                 f.writelines(lines[-reserve:] if reserve > 0 else [])
 
     def _log(self, level: str, msg: str):
         self._clean_log()
-        log_content = f"[{self._get_ts()}] [OPT_SERVER] [{level}] {msg}\n"
+        log_content = f"[{get_ts()}] [OPT_SERVER] [{level}] {msg}\n"
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
-    def _makeup_response(self,task_type:str):
-        response = {}
-        # 50% 概率成功，50% 概率失败
-        status = 'success' if random.random() > 0.5 else 'failed'
-        
-        if status == 'success':
-            response['response_data'] = {
-                "code": 200,
-                "message": "处理成功",
-                "data": {
-                    "result": f"成功处理了{task_type}任务",
-                    "timestamp": self._get_ts()
-                }
-            }
-        else:
-            response['response_data'] = {
-                "code": 500,
-                "message": "处理失败",
-                "data": {
-                    "error": "处理超时或系统错误",
-                    "timestamp": self._get_ts()
-                }
-            }
-        
-        response['status'] = status
-        return response
-
     def run(self):
+        
         @self.app.get("/api/process")
         async def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             self._log("INFO", f"[REQ-{request_id}] 接收请求。TaskID: {task_id}, 任务类型: {task_type}")
@@ -193,9 +124,9 @@ class OptimizedServer:
             # =================================================
 
             # 2. 如果是新任务，往下执行业务处理
-            time.sleep(0.1)
+            time.sleep(TASK_COST)
             
-            final_response = self._makeup_response(task_type=task_type)
+            final_response = makeup_response(task_type=task_type)
             
             if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
                 redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
@@ -232,8 +163,10 @@ class OptimizedServer:
             if token:
                 alert_system_token_set.add(token)
                 self._log("INFO", f"Android 设备已成功注册，Token: {token[:10]}...")
-                return {"status": "ok"}
-            return {"status": "error", "msg": "No token provided"}
+                return {"status": "success"}
+            return {"status": "failed", "msg": "No token provided"}
 
         self._log("START", f"服务端启动，监听 {self.host}:{self.port} ...")
         uvicorn.run(self.app, host=self.host, port=self.port, log_level="error")
+        
+        

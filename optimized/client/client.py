@@ -2,28 +2,18 @@ import requests, time, datetime, os, json, threading, random
 import sys
 
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
+from common.baseline import CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_host, get_ts
 from optimized.client.LoggedRetry import LoggedRetry
 
-GATEWAY_HOST, GATEWAY_PORT = "127.0.0.1", 8080
 LOG_DIR, RESULT_DIR = "logs/optimized", "experiment_results/optimized"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
 QUEUE_FILE = os.path.join(LOG_DIR, "fault_queue.json")
 MAX_LOG_SIZE = 20 * 1024 * 1024
 
-# ================= requests 配置 =================
-
-CONNECT_TIMEOUT = 2.0
-REQUEST_TIMEOUT = 3.0
-RETRY_TIMES = 2
-REQUEST_TIMES = 30
-ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference", "Model_Deployment"]
-
-# =================================================
-
 class OptimizedClient:
-    def __init__(self, gateway_host:str = GATEWAY_HOST, gateway_port:int = GATEWAY_PORT):
+    
+    def __init__(self, gateway_host:str, gateway_port:int):
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.gateway_url = f'http://{self.gateway_host}:{self.gateway_port}'
@@ -46,19 +36,17 @@ class OptimizedClient:
         self.running = True
         threading.Thread(target=self._async_worker, daemon=True).start()
 
-    def _get_ts(self) -> str: return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
     def _clean_log(self):
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= MAX_LOG_SIZE:
             with open(LOG_FILE, "r", encoding="utf-8") as f: lines = f.readlines()
             reserve = int(len(lines) * 2 / 3)
             with open(LOG_FILE, "w", encoding="utf-8") as f:
-                f.write(f"[{self._get_ts()}] [OPT_CLIENT] [LOG_CLEAN] 日志达20M上限，清理最早1/3\n")
+                f.write(f"[{get_ts()}] [OPT_CLIENT] [LOG_CLEAN] 日志达20M上限，清理最早1/3\n")
                 f.writelines(lines[-reserve:] if reserve > 0 else [])
 
     def _log(self, level: str, msg: str):
         self._clean_log()
-        log_content = f"[{self._get_ts()}] [OPT_CLIENT] [{level}] {msg}\n"
+        log_content = f"[{get_ts()}] [OPT_CLIENT] [{level}] {msg}\n"
         with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
         print(log_content.strip())
 
@@ -104,15 +92,15 @@ class OptimizedClient:
         
         report = f"""==================================================
 DISTRIBUTED ML SYSTEM - OPTIMIZED MODE REPORT
-Generated: {self._get_ts()}
+Generated: {get_ts()}
 ==================================================
 [SYSTEM CONFIGURATION]
   Gateway Address          : {self.gateway_url}
   Client Timeout           : {REQUEST_TIMEOUT}s
   Total Requests           : {REQUEST_TIMES}
   Simulated Tasks          : [{", ".join(ML_TASK_TYPES)}]
-  Mimic Fault Config       : Upstream (40%) + Downstream (20%)
-  Server Handler Per Task  : 0.1s
+  Mimic Fault Config       : Upstream ({UPSTREAM_FAULT_PROB*100}%) + Downstream ({DOWNSTREAM_FAULT_PROB*100}%)
+  Server Handler Per Task  : {TASK_COST}s
   client retry config      : {RETRY_TIMES}
 ==================================================
 [RELIABILITY METRICS]
@@ -187,7 +175,7 @@ Generated: {self._get_ts()}
             except requests.exceptions.RequestException:
                 self._log("ERROR", f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）。上报服务端！")
                 self.failed += 1
-                self._enqueue(req_id, task_id, task_type, self._get_ts())
+                self._enqueue(req_id, task_id, task_type, get_ts())
                 
             time.sleep(0.5)
 
@@ -221,4 +209,5 @@ Generated: {self._get_ts()}
         return session
     
 if __name__ == "__main__": 
-    OptimizedClient(gateway_host='127.0.0.1', gateway_port=8080).run()
+    OptimizedClient(gateway_host=get_host(), gateway_port=GATEWAY_PORT).run()
+    

@@ -2,7 +2,7 @@ import random
 import requests, time, datetime, os
 import sys
 
-from common.baseline import GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, get_host, get_ts
+from common.baseline import DOWNSTREAM_FAULT_PROB, GATEWAY_PORT, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_host, get_ts
 
 LOG_DIR, RESULT_DIR = "logs/traditional", "experiment_results/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "client.log")
@@ -31,6 +31,7 @@ class TraditionalClient:
         print(log_content.strip())
         
     def run(self):
+        
         self._log(f"开始模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
         self.experiment_start_time = time.time() # 记录总开始时间
         
@@ -87,8 +88,8 @@ Generated: {get_ts()}
   Client Timeout           : {REQUEST_TIMEOUT}s
   Total Requests           : {REQUEST_TIMES}
   Simulated Tasks          : [{", ".join(ML_TASK_TYPES)}]
-  Mimic Fault Config       : Upstream (40%) + Downstream (20%)
-  Server Handler Per Task  : 0.1s
+  Mimic Fault Config       : Upstream {UPSTREAM_FAULT_PROB*100}%) + Downstream ({DOWNSTREAM_FAULT_PROB*100}%)
+  Server Handler Per Task  : {TASK_COST}s
 ==================================================
 [RELIABILITY METRICS]
   Total Sent      : {REQUEST_TIMES}

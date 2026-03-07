@@ -3,7 +3,7 @@ import time
 import os
 import uvicorn
 
-from common.baseline import  get_ts, makeup_response
+from common.baseline import  TASK_COST, get_ts, makeup_response
 
 LOG_DIR = "logs/traditional"
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
@@ -28,7 +28,7 @@ class TraditionalServer:
         async def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             # 模拟识别 ML 任务
             self._log(f"[REQ-{request_id}] 接收请求。TaskID: {task_id}, 任务类型: {task_type}")
-            time.sleep(0.1)
+            time.sleep(TASK_COST)
             self._log(f"[REQ-{request_id}] {task_type} 处理成功，已发出响应。")
             
             return makeup_response(task_type=task_type)

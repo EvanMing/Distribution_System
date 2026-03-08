@@ -34,6 +34,13 @@ class DistributedClient:
         self.experiment_end_time = 0       # 主循环结束时间
         # ================================================================
         
+        # ================================================================
+        # 新增：自愈机制（Outcome 0）专项统计指标
+        self.self_healed_success = 0           # 成功自愈的任务数
+        self.self_healing_bytes_sent = 0       # 自愈流程产生的发送开销
+        self.self_healing_bytes_received = 0   # 自愈流程产生的接收开销
+        # ================================================================
+        
         for d in [LOG_DIR, RESULT_DIR]: os.makedirs(d, exist_ok=True)
         if not os.path.exists(QUEUE_FILE):
             with open(QUEUE_FILE, "w") as f: json.dump([], f)
@@ -45,34 +52,81 @@ class DistributedClient:
         with open(QUEUE_FILE, "r") as f: q = json.load(f)
         q.append({"request_id": req_id, "task_type": task_type, 'task_id':task_id, "timestamp":timestamp})
         with open(QUEUE_FILE, "w") as f: json.dump(q, f)
-        self.logger.info(f"[REQ-{req_id}] 异常记录已写入本地队列。")
+        self.logger.info(f"[REPORT] [REQ-{req_id}] 异常记录已写入本地队列。")
 
     def _async_worker(self):
-        # 此处不进行任何性能和网络开销的统计，仅负责静默重试
         while self.running:
             try:
                 with open(QUEUE_FILE, "r") as f: q = json.load(f)
                 if q:
                     task = q[0]
                     req_id, task_id, task_type = task["request_id"], task["task_id"], task["task_type"]
-                    self.logger.info(f"[REQ-{req_id}] 异步尝试向服务端上报异常记录 [{task_id} - {task_type}]...")
+                    self.logger.info(f"[REPORT] [REQ-{req_id}] 异步尝试向服务端上报异常记录 [{task_id} - {task_type}]...")
                     
-                    res = requests.post(f"{self.gateway_url}/api/report", json=task)
+                    # 1. 统计 Report 请求发送开销
+                    report_url = f"{self.gateway_url}/api/report"
+                    report_req_size = sys.getsizeof(report_url) + sys.getsizeof(json.dumps(task))
+                    self.self_healing_bytes_sent += report_req_size
+                    
+                    res = requests.post(report_url, json=task)
+                    
+                    # 2. 统计 Report 请求接收开销
+                    self.self_healing_bytes_received += len(res.content)
                     
                     if res.status_code == 200:
                         json_res = res.json()
-                        self.logger.info(f"[REQ-{req_id}] explaination: {json_res.get('explaination')}")
+                        self.logger.info(f"[REPORT] [REQ-{req_id}] [{json_res.get('task_priority')}] {json_res.get('explaination')}")
+                        
                         if json_res.get('outcome') == 1:
-                            self.logger.info(f"[REQ-{req_id}] 双向确认完成！从队列移除。")
+                            self.logger.info(f"[REPORT] [REQ-{req_id}] 双向确认完成！从队列移除。")
                             q.pop(0)
                             with open(QUEUE_FILE, "w") as f: json.dump(q, f)
                         else:
-                            self.logger.warning(f"[REQ-{req_id}] resent request again")
-                            failed_task = q.pop(0)
-                            q.append(failed_task)
-                            with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+                            self.logger.warning(f"[REPORT] [REQ-{req_id}] 收到支持重新获取响应异常(outcome 0)，正在重新向网关发起原始业务请求...")
+                            
+                            params = {
+                                "request_id": req_id,
+                                "task_id": task_id,
+                                "task_type": task_type
+                            }
+                            
+                            # 3. 统计 Retry (Forward) 请求发送开销
+                            forward_url = f"{self.gateway_url}/api/forward"
+                            retry_req_size = sys.getsizeof(forward_url) + sys.getsizeof(str(params))
+                            self.self_healing_bytes_sent += retry_req_size
+                            
+                            try:
+                                retry_res = requests.get(
+                                    forward_url, 
+                                    params=params, 
+                                    timeout=(CONNECT_TIMEOUT, REQUEST_TIMEOUT)
+                                )
+                                
+                                # 4. 统计 Retry (Forward) 请求接收开销
+                                self.self_healing_bytes_received += len(retry_res.content)
+                                
+                                if retry_res.status_code == 200:
+                                    # ======================================================
+                                    # 记录自愈成功
+                                    self.self_healed_success += 1
+                                    # ======================================================
+                                    self.logger.info(f"[REPORT] [REQ-{req_id}] 重新发起业务请求成功！静默处理完毕。最终响应: {retry_res.json()}")
+                                    q.pop(0)
+                                    with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+                                else:
+                                    self.logger.warning(f"[REPORT] [REQ-{req_id}] 重新请求失败(HTTP {retry_res.status_code})，移至队尾等待下次尝试。")
+                                    failed_task = q.pop(0)
+                                    q.append(failed_task)
+                                    with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+                                    
+                            except Exception as retry_e:
+                                self.logger.warning(f"[REPORT] [REQ-{req_id}] 重新发起业务请求时发生网络异常: {retry_e}，移至队尾等待下次尝试。")
+                                failed_task = q.pop(0)
+                                q.append(failed_task)
+                                with open(QUEUE_FILE, "w") as f: json.dump(q, f)
+
             except Exception as e:
-                self.logger.info(f"{e}")
+                self.logger.info(f"[REPORT] 异步队列处理异常: {e}")
                 
             time.sleep(FAULT_QUEUE_POLL_TIME)
 
@@ -80,7 +134,13 @@ class DistributedClient:
         response_rate = round(self.success / REQUEST_TIMES * 100, 2) if REQUEST_TIMES > 0 else 0
         total_exec_time = round(self.experiment_end_time - self.experiment_start_time, 3)
         avg_latency = round(sum(self.latencies) / len(self.latencies), 3) if self.latencies else 0
-        total_overhead_kb = round((self.total_bytes_sent + self.total_bytes_received) / 1024, 2)
+        
+        # 主流程网络开销
+        main_overhead_kb = round((self.total_bytes_sent + self.total_bytes_received) / 1024, 2)
+        # 自愈流程网络开销
+        healing_overhead_kb = round((self.self_healing_bytes_sent + self.self_healing_bytes_received) / 1024, 2)
+        # 系统总开销
+        total_overhead_kb = round(main_overhead_kb + healing_overhead_kb, 2)
         
         report = f"""==================================================
 DISTRIBUTED ML SYSTEM - DISTRIBUTED MODE REPORT
@@ -106,10 +166,15 @@ Generated: {get_ts()}
   Server Valkey Hits : {self.server_cache_hits} (Idempotency)
   Gateway RDS Hits   : {self.gateway_degrade_hits} (Degradation)
 ==================================================
-[MAIN FLOW PERFORMANCE & OVERHEAD]
-  Total Exec Time : {total_exec_time} seconds
-  Average Latency : {avg_latency} seconds/req
-  Network Overhead: {total_overhead_kb} KB (Approx. Sent + Received)
+[SELF-HEALING METRICS (OUTCOME 0)]
+  Self-Healed Success     : {self.self_healed_success}
+  Healing Net Overhead    : {healing_overhead_kb} KB
+==================================================
+[PERFORMANCE & OVERHEAD SUMMARY]
+  Total Exec Time         : {total_exec_time} seconds
+  Average Latency         : {avg_latency} seconds/req
+  Main Flow Overhead      : {main_overhead_kb} KB
+  Total System Overhead   : {total_overhead_kb} KB (Main + Healing)
 ==================================================
 """
         with open(f"{RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}", "w", encoding="utf-8") as f: f.write(report)

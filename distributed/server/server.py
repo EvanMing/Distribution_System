@@ -89,6 +89,9 @@ class DistributedServer:
                 except Exception as e:
                     self.logger.warning(f"推送失败: {e}")
 
+    def _makeup_fault_response(self,outcome,task_priority,explaination):
+        return {"status": "success", 'outcome':outcome, 'task_priority':task_priority, 'explaination':explaination}
+
     def run(self):
         
         @self.app.get("/api/process")
@@ -141,9 +144,9 @@ class DistributedServer:
                             reason = reason)
             
             if task_priority == 'low':
-                return {"status": "success", 'outcome':0, 'explaination':'resent this request again'}
+                return self._makeup_fault_response(outcome=0,task_priority=task_priority,explaination='resent this request again')
             else:
-                return {"status": "success", 'outcome':1, 'explaination':'Awaiting resolution'}
+                return self._makeup_fault_response(outcome=1,task_priority=task_priority,explaination='Awaiting resolution')
             
         @self.app.post("/api/register_device")
         def register_device(payload: Dict[str, Any] = Body(...)):

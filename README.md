@@ -63,7 +63,7 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
 
 ## ⚙️ Quick Start
 
-* step 1: Create a .env file in the root directory:
+### step 1: Create a .env file in the root directory:
    * VALKEY_ENDPOINT=your-redis-host
    * RDS_HOST=your-mysql-host
    * RDS_USER=root
@@ -71,7 +71,7 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
    * RDS_DB_NAME=gatewaycache
    * FIREBASE_CERT_PATH=serviceAccountKey.json
 
-* step 2: install essential packages
+### step 2: install essential packages
    * # 1. 更新系统源
    * sudo apt update -y
    * # 2. 安装核心工具（Python 基础包、Git、Nginx）

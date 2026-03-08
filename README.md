@@ -63,10 +63,10 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
 
 ## ⚙️ Quick Start
 
-Create a .env file in the root directory:
-VALKEY_ENDPOINT=your-redis-host
-RDS_HOST=your-mysql-host
-RDS_USER=root
-RDS_PASSWORD=your-password
-RDS_DB_NAME=gatewaycache
-FIREBASE_CERT_PATH=serviceAccountKey.json
+* Create a .env file in the root directory:
+   * VALKEY_ENDPOINT=your-redis-host
+   * RDS_HOST=your-mysql-host
+   * RDS_USER=root
+   * RDS_PASSWORD=your-password
+   * RDS_DB_NAME=gatewaycache
+   * FIREBASE_CERT_PATH=serviceAccountKey.json

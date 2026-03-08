@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 import os
 import time
 import datetime
@@ -20,22 +21,32 @@ import uvicorn
 # 引入数据库连接池
 from dbutils.pooled_db import PooledDB
 
-from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, GATEWAY_FORWARD_RESPONSE_TIMEOUT, 
+from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, FAIL_THRESHOLD, GATEWAY_FORWARD_RESPONSE_TIMEOUT, GATEWAY_MAX_WORKERS, 
                              MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, 
-                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB )
+                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB, WINDOW_SIZE )
 from common.logger_config import setup_logger
 
 LOG_PATH = "logs/distributed/gateway.log"
 
+local_upstream_fault_prob = UPSTREAM_FAULT_PROB
+
 class DistributedGateway:
     
-    def __init__(self, gateway_host:str, gateway_port:int, server_url:str):
+    def __init__(self, gateway_host:str, gateway_port:int, server_url:str,backup_server_url:str=None):
         self.logger = setup_logger("GATEWAY", log_file = LOG_PATH, max_bytes = 50*1024*1024)
         self.app = FastAPI()
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.server_url = server_url
-        self.executor = ThreadPoolExecutor(max_workers=10)
+        self.backup_server_url = backup_server_url
+        self.executor = ThreadPoolExecutor(max_workers=GATEWAY_MAX_WORKERS)
+        
+        # ================= 熔断与调度状态 =================
+        self.is_circuit_open = False  # False = 走主节点，True = 走备用节点
+        self.window_size = WINDOW_SIZE         # 统计最近 WINDOW_SIZE 次请求
+        self.fail_threshold = FAIL_THRESHOLD     # 失败率阈值 (FAIL_THRESHOLD)
+        self.req_window = deque(maxlen=self.window_size) # 记录请求状态: True(成功), False(失败)
+        # ==================================================
         
         # 1. 优先初始化数据库连接池
         self._init_db_pool()
@@ -199,6 +210,24 @@ class DistributedGateway:
         response['status'] = status
         return response
 
+    def _update_circuit_state(self, is_success: bool):
+        """更新滑动窗口并检查是否需要触发熔断"""
+        if self.is_circuit_open:
+            return # 已经熔断，暂不统计主节点状态（除非引入半开探活机制）
+            
+        self.req_window.append(is_success)
+        
+        # 只有当窗口填满时才计算失败率
+        if len(self.req_window) == self.window_size:
+            fail_count = self.req_window.count(False)
+            fail_rate = fail_count / self.window_size
+            
+            if fail_rate >= self.fail_threshold:
+                global local_upstream_fault_prob
+                local_upstream_fault_prob = local_upstream_fault_prob/2
+                self.logger.error(f"主节点故障率达到 {fail_rate*100}%，触发熔断！后续流量将切换至备用服务器。")
+                self.is_circuit_open = True
+
     def run(self):
         
         @self.app.get("/api/forward")
@@ -207,23 +236,36 @@ class DistributedGateway:
             success_response = None
             params = {"request_id": request_id, "task_id": task_id, "task_type": task_type}
             
+            # 动态选择目标服务器
+            target_url = self.backup_server_url if self.is_circuit_open and self.backup_server_url else self.server_url
+            
             while attempt < ATTEMPT_TIMES:
                 attempt += 1
                 try:
-                    res = await self.client.get(f"{self.server_url}/api/process", params=params, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
+                    res = await self.client.get(f"{target_url}/api/process", params=params, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
                     self.logger.info(f"[REQ-{request_id}] [第 {attempt} 次尝试]")
                     
-                    if random.random() < UPSTREAM_FAULT_PROB:
+                    if random.random() < local_upstream_fault_prob:
                         self.logger.error(f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
                         raise httpx.TimeoutException("Simulated upstream loss") # 抛出 httpx 的超时异常
                     
                     success_response = res.json()
                     cached_data = await asyncio.get_event_loop().run_in_executor(
                                         self.executor, self._get_from_cache, task_type, task_id)
+                    
+                    # 记录成功（只在访问主节点时统计）
+                    if not self.is_circuit_open:
+                        self._update_circuit_state(is_success=True)
+                    
                     self.logger.info("成功拿到服务端响应。")
                     break
                 except Exception as e:
                     self.logger.warning(f"[REQ-{request_id}] [第 {attempt} 次尝试] 获取响应失败，原因: {e}，重试中...")
+                    
+                    # 每次请求异常都视为失败（可选：只在最后一次重试失败后才记录）
+                    if not self.is_circuit_open:
+                        self._update_circuit_state(is_success=False)
+                    
                     await asyncio.sleep(RESPIRED_TIME)
             
             # 如果重试耗尽，从 AWS RDS 捞取降级缓存

@@ -13,7 +13,7 @@ from firebase_admin import credentials, messaging
 from common.baseline import ACTIVE_REDIS_HOST, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, makeup_response
 from common.logger_config import setup_logger
 
-LOG_PATH = "logs/distributed/server.log"
+LOG_PATH = "logs/distributed/server_backup.log"
 
 alert_system_token_set: Optional[Set[str]] = set()
 
@@ -28,10 +28,10 @@ redis_client = redis.Redis(
 
 IS_REDIS_CONNECTED = False
 
-class DistributedServer:
+class DistributedBackupServer:
     
     def __init__(self,host:str ,port:int):
-        self.logger = setup_logger("SERVER", log_file = LOG_PATH, max_bytes = 100*1024*1024)
+        self.logger = setup_logger("SERVER-BACKUP", log_file = LOG_PATH, max_bytes = 100*1024*1024)
         self.app = FastAPI()
         self._init_redis()
         self.host = host
@@ -67,7 +67,7 @@ class DistributedServer:
             
             # 合并本地可能存在的降级 Token
             current_tokens.update(alert_system_token_set)
-
+        
             if len(current_tokens) < 1:
                 self.logger.warning("推送失败：没有找到已注册设备 Token")
                 return 

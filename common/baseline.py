@@ -14,6 +14,7 @@ ANY_HOST = '0.0.0.0'
 #-----------------------------server---------------------
 
 SERVER_PORT = 8000
+BACKUP_SERVER_PORT = 8001
 
 FAULT_REASON = [
     "Network issues", 
@@ -43,7 +44,10 @@ UPSTREAM_FAULT_PROB = 0.4
 DOWNSTREAM_FAULT_PROB = 0.2
 TIME_SLEEP = 3.1
 RESPIRED_TIME = 0.2
+GATEWAY_MAX_WORKERS = 10
 GATEWAY_FORWARD_RESPONSE_TIMEOUT = 2
+WINDOW_SIZE = 15         # 统计最近 10 次请求
+FAIL_THRESHOLD = 0.5     # 失败率阈值 (50%)
 GATEWAY_PORT =  8080
 SERVER_URL = f"http://{LOCAL_HOST}:{SERVER_PORT}"
 

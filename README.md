@@ -50,20 +50,54 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
 ## 📂 Project Structure
 
 ```text
-.
-├── common/                 # Global constants (baseline.py), logger config
-├── distributed/            # Distributed mode components
-│   ├── client/             # Self-healing client with async workers
-│   ├── gateway/            # Circuit-breaking gateway with RDS integration
-│   └── server/             # Idempotent Primary and Backup servers
-├── traditional/            # Baseline comparison components (Client, Gateway, Server)
-├── logs/                   # System-generated logs (client.log, gateway.log, etc.)
-└── experiment_results/     # Automated experiment reports (result.txt)
+project_root/
+├── common/                      # Shared base modules
+│   ├── baseline.py              # Global configuration & constants
+│   └── logger_config.py         # Asynchronous rotating logger setup
+├── distributed/                 # Distributed Fault-Tolerant Mode
+│   ├── client/                  # Client with async self-healing queue
+│   ├── gateway/                 # API Gateway with circuit breaker & RDS fallback cache
+│   ├── server/                  # Primary server with Redis/Valkey idempotency
+│   └── server_backup/           # Standby server for failover
+├── traditional/                 # Traditional Baseline Mode (No Fault-Tolerance)
+│   ├── client/
+│   ├── gateway/
+│   └── server/
+├── logs/                        # Auto-generated log output directory
+├── experiment_results/          # Auto-generated experiment report directory
+├── .env.example                 # Example environment variable template
+└── .env                         # Your local environment configuration (create manually)
 ```
 
 ## ⚙️ Quick Start
 
-### step 1: Create a .env file in the root directory:
+### step 1: Config EC2
+
+* instance1-client(US.N.Virginia) Ubuntu22.04+t2.small + 共享密钥对 SSH(22)、TCP(8000) 
+* instance1-gateway(US.N.Virginia) Ubuntu22.04+t2.small + 共享密钥对 SSH(22)、TCP(8000)、TCP(8080) 
+* instance1-server(US.N.Virginia) Ubuntu22.04+t2.small + 共享密钥对 SSH(22)、TCP(6379) 、TCP(8001)
+* instance1-server-backup(US.N.Virginia) Ubuntu22.04+t2.micro + 共享密钥对 SSH(22)、TCP(6379)、TCP(8000) 
+
+### step 2: Install essential packages
+* sudo apt update -y # 1. 更新系统源
+* sudo apt install -y python3-pip python3-dev git nginx # 2. 安装核心工具（Python 基础包、Git、Nginx）
+* sudo apt install -y python3-venv python3-full # 3. 安装虚拟环境所需依赖（Ubuntu 推荐方式）
+* python3 -m venv group_6 # 4. 创建虚拟环境
+* source group_6/bin/activate # 5. 激活虚拟环境
+* pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv # 6. 一次性安装所有 Python 依赖
+* python --version && uvicorn --version && pip list | grep fastapi # 7. 验证安装
+  
+* windows command, local verification
+   * netstat -ano | findstr :8000 # 查找占用 8000 1234
+   * taskkill /F /PID 1234
+
+
+### step 3: Pull code
+* git config --global user.name "Tom Chan" 
+* git config --global user.email "tom.chan@gmail.com"
+* git clone https://github.com/EvanMing/Distribution_System.git
+
+### step 4: Create a .env file in the root directory:
 * VALKEY_ENDPOINT=your-redis-host
 * RDS_HOST=your-mysql-host
 * RDS_USER=root
@@ -71,11 +105,16 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
 * RDS_DB_NAME=gatewaycache
 * FIREBASE_CERT_PATH=serviceAccountKey.json
 
-### step 2: install essential packages
-* sudo apt update -y # 1. 更新系统源
-* sudo apt install -y python3-pip python3-dev git nginx # 2. 安装核心工具（Python 基础包、Git、Nginx）
-* sudo apt install -y python3-venv python3-full # 3. 安装虚拟环境所需依赖（Ubuntu 推荐方式）
-* python3 -m venv group_6 # 4. 创建虚拟环境
-* source group_6/bin/activate # 5. 激活虚拟环境
-* pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv # 6. 一次性安装所有 Python 依赖（合并了原来的多条命令）
-* python --version && uvicorn --version && pip list | grep fastapi # 7. 验证安装
+### step 5: start server
+* python -m traditional.server.server_main
+* python -m traditional.gateway.gateway_main
+* python -m traditional.client.client_main
+
+* python -m distributed.server.server_main 
+* python -m distributed.server.server_backup_main 
+* python -m distributed.gateway.gateway_main
+* python -m distributed.client.client_main
+
+### remark
+* config local valley environment
+* ssh -i 'E:\my-key.pem' -L 6379:com6102-group6-server-cache.gfxyxq.ng.0001.use1.cache.amazonaws.com:6379 ubuntu@ip

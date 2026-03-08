@@ -20,9 +20,9 @@ import uvicorn
 # 引入数据库连接池
 from dbutils.pooled_db import PooledDB
 
-from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, GATEWAY_FORWARD_RESPONSE_TIMEOUT, LOCAL_HOST, 
+from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, GATEWAY_FORWARD_RESPONSE_TIMEOUT, 
                              MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, 
-                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB, get_ts )
+                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB )
 from common.logger_config import setup_logger
 
 LOG_PATH = "logs/distributed/gateway.log"
@@ -30,7 +30,6 @@ LOG_PATH = "logs/distributed/gateway.log"
 class DistributedGateway:
     
     def __init__(self, gateway_host:str, gateway_port:int, server_url:str):
-        # 初始化日志
         self.logger = setup_logger("GATEWAY", log_file = LOG_PATH, max_bytes = 50*1024*1024)
         self.app = FastAPI()
         self.gateway_host = gateway_host
@@ -51,12 +50,6 @@ class DistributedGateway:
         self.client = httpx.AsyncClient(
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
-
-    def _log(self, level, msg):
-        if level.upper() == "INFO": self.logger.info(msg)
-        elif level.upper() == "ERROR": self.logger.error(msg)
-        elif level.upper() == "WARNING": self.logger.warning(msg)
-        else: self.logger.info(f"[{level}] {msg}")
 
 # ================= AWS RDS (MySQL) 操作优化 =================
 
@@ -81,9 +74,9 @@ class DistributedGateway:
                 cursorclass=pymysql.cursors.DictCursor,
                 connect_timeout=5
             )
-            self._log("INIT", "AWS RDS MySQL 连接池初始化成功！")
+            self.logger.info("AWS RDS MySQL 连接池初始化成功！")
         except Exception as e:
-            self._log("ERROR", f"RDS 连接池初始化失败: {e}")
+            self.logger.warning(f"RDS 连接池初始化失败: {e}")
 
     def _get_db_connection(self):
         """从连接池中获取一个可用的连接"""
@@ -107,9 +100,9 @@ class DistributedGateway:
                 ''')
             connection.commit()
             connection.close() # 释放回连接池
-            self._log("INIT", f"已成功连接并挂载 AWS RDS MySQL: {RDS_HOST}")
+            self.logger.info(f"已成功连接并挂载 AWS RDS MySQL")
         except Exception as e:
-            self._log("ERROR", f"RDS 数据库初始化失败，请检查网络或白名单: {e}")
+            self.logger.warning(f"RDS 数据库初始化失败，请检查网络或白名单: {e}")
 
     def _save_to_cache(self, task_type: str, task_id: str, response):
         def _do_save():
@@ -135,10 +128,10 @@ class DistributedGateway:
                                 f'DELETE FROM {RDS_DB_TABLE} ORDER BY ts ASC LIMIT %s',
                                 (delete_count,)
                             )
-                            self._log("CACHE_CLEAN", f"RDS 自动清理了 {delete_count} 条数据。")
+                            self.logger.info(f"RDS 自动清理了 {delete_count} 条数据。")
                     connection.commit()
             except Exception as e:
-                self._log("ERROR", f"后台写入 RDS 失败: {e}")
+                self.logger.warning(f"后台写入 RDS 失败: {e}")
 
         self.executor.submit(_do_save)
             
@@ -158,7 +151,7 @@ class DistributedGateway:
                 data = row['response_data']
                 return json.loads(data) if isinstance(data, str) else data
         except Exception as e:
-            self._log("ERROR", f"读取 RDS 缓存失败: {e}")
+            self.logger.warning(f"读取 RDS 缓存失败: {e}")
         finally:
             if connection:
                 connection.close()
@@ -172,9 +165,9 @@ class DistributedGateway:
                 cursor.execute(f'TRUNCATE TABLE {RDS_DB_TABLE}')
             connection.commit()
             connection.close() # 释放回连接池
-            self._log("INIT", f"已成功清空 RDS 缓存表: {RDS_DB_TABLE}")
+            self.logger.info(f"已成功清空 RDS 缓存表: {RDS_DB_TABLE}")
         except Exception as e:
-            self._log("ERROR", f"清空 RDS 缓存表失败: {e}")
+            self.logger.warning(f"清空 RDS 缓存表失败: {e}")
                 
     def _export_cache_to_csv(self, filename: str = "gateway_task_cache.csv"):
         try:
@@ -191,24 +184,34 @@ class DistributedGateway:
             connection.close() 
             
             if not data:
-                self._log("EXPORT", "RDS 缓存表为空，没有数据可导出。")
+                self.logger.info("RDS 缓存表为空，没有数据可导出。")
             
             df = pd.DataFrame(data)
             if not df.empty:
                 # index=False 表示不导出 DataFrame 的行索引
                 # encoding='utf-8-sig' 可以完美兼容 Windows Excel，防止中文乱码
                 df.to_csv(filename, index=False, encoding='utf-8-sig')
-                self._log("EXPORT", f"成功从 RDS 导出数据，总计: {len(df)} 行，已保存至: {filename}")
+                self.logger.info(f"成功从 RDS 导出数据，总计: {len(df)} 行，已保存至: {filename}")
             else:
-                self._log("EXPORT", "RDS 缓存表为空，没有数据可导出。")
+                self.logger.info("RDS 缓存表为空，没有数据可导出。")
                 
             return df
             
         except Exception as e:
-            self._log("ERROR", f"导出 CSV 失败: {e}")
+            self.logger.warning(f"导出 CSV 失败: {e}")
             return pd.DataFrame()
                 
 # ========================================================
+
+    def _makeup_response(self):
+        response = {}
+        status = 'failed'
+        response['response_data'] = {
+                "code": 500,
+                "message": "Retry exhausted & No RDS cache",
+            }
+        response['status'] = status
+        return response
 
     def run(self):
         
@@ -222,37 +225,37 @@ class DistributedGateway:
                 attempt += 1
                 try:
                     res = await self.client.get(f"{self.server_url}/api/process", params=params, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
-                    self._log("SUCCESS", f"[REQ-{request_id}] [第 {attempt} 次尝试]")
+                    self.logger.info(f"[REQ-{request_id}] [第 {attempt} 次尝试]")
                     
                     if random.random() < UPSTREAM_FAULT_PROB:
-                        self._log("WARNING", f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
+                        self.logger.error(f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
                         raise httpx.TimeoutException("Simulated upstream loss") # 抛出 httpx 的超时异常
                     
                     success_response = res.json()
                     cached_data = await asyncio.get_event_loop().run_in_executor(
                                         self.executor, self._get_from_cache, task_type, task_id)
-                    self._log("SUCCESS", "成功拿到服务端响应。")
+                    self.logger.info("成功拿到服务端响应。")
                     break
                 except Exception as e:
-                    self._log("RETRY", f"[REQ-{request_id}] [第 {attempt} 次尝试] 获取响应失败，原因: {e}，重试中...")
+                    self.logger.warning(f"[REQ-{request_id}] [第 {attempt} 次尝试] 获取响应失败，原因: {e}，重试中...")
                     await asyncio.sleep(RESPIRED_TIME)
             
             # 如果重试耗尽，从 AWS RDS 捞取降级缓存
             if not success_response:
-                self._log("DEGRADE_START", f"[REQ-{request_id}] 重试完全耗尽，正从 AWS RDS 提取兜底缓存...")
+                self.logger.info(f"[REQ-{request_id}] 重试完全耗尽，正从 AWS RDS 提取兜底缓存...")
                 cached_data = self._get_from_cache(task_type, task_id)
                 
                 if cached_data:
-                    self._log("DEGRADE_HIT", f"[REQ-{request_id}] 命中 RDS 降级缓存！执行兜底返回。")
+                    self.logger.info(f"[REQ-{request_id}] 命中 RDS 降级缓存！执行兜底返回。")
                     cached_data["status"] = "success"
                     cached_data["gateway_note"] = "Gateway Cache Fallback (From AWS RDS)"
                     success_response = cached_data
                 else:
-                    self._log("DEGRADE_MISS", f"[REQ-{request_id}] RDS 中无 {task_type} 缓存，请求彻底失败。")
-                    return {"status": "failed", "response_data": "Retry exhausted & No RDS cache"}
+                    self.logger.error(f"[REQ-{request_id}] RDS 中无 {task_type} 缓存，请求彻底失败。")
+                    success_response = self._makeup_response()
                 
             if random.random() < DOWNSTREAM_FAULT_PROB:
-                self._log("FAULT", f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
+                self.logger.error(f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
                 await asyncio.sleep(TIME_SLEEP)
                 
             return success_response
@@ -263,7 +266,7 @@ class DistributedGateway:
         def report(payload: Dict[str, Any] = Body(...)):
             return requests.post(f"{self.server_url}/api/report_fault", json=payload).json()
 
-        self._log("START", f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
+        self.logger.info(f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
         
         

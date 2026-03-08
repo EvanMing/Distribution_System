@@ -2,17 +2,20 @@ import random
 import requests, time, os
 import sys
 
-from common.baseline import DOWNSTREAM_FAULT_PROB, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from common.baseline import DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
-LOG_DIR, RESULT_DIR = "logs/traditional", "experiment_results/traditional"
-LOG_FILE = os.path.join(LOG_DIR, "client.log")
+
+from common.logger_config import setup_logger
+
+RESULT_DIR = "experiment_results/traditional"
+LOG_PATH = 'logs/traditional/client.log'
 
 class TraditionalClient:
     
     def __init__(self,gateway_host:str, gateway_port:int ):
-        
+        self.logger = setup_logger("CLIENT", log_file=LOG_PATH, max_bytes=20*1024*1024)
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.gateway_url = f'http://{self.gateway_host}:{self.gateway_port}'
@@ -25,12 +28,7 @@ class TraditionalClient:
         self.experiment_end_time = 0       # 实验总结束时间
         # ====================================================
         
-        for d in [LOG_DIR, RESULT_DIR]: os.makedirs(d, exist_ok=True)
-        
-    def _log(self, msg: str):
-        log_content = f"[{get_ts()}] [TRAD_CLIENT] {msg}\n"
-        with open(LOG_FILE, "a", encoding="utf-8") as f: f.write(log_content)
-        print(log_content.strip())
+        for d in [RESULT_DIR]: os.makedirs(d, exist_ok=True)
    
     def _send_single_request(self, i: int, session: requests.Session):
         """处理单次请求的逻辑"""
@@ -54,21 +52,21 @@ class TraditionalClient:
             response_data = json_res.get('response_data')
             
             if res.status_code == 200 and json_res.get('status') != 'failed':
-                self._log(f"[REQ-{req_id}] - [{task_id} - {task_type}] 成功收到响应: ({response_data}) 耗时 {round(latency, 2)}s")
+                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] 成功收到响应: ({response_data}) 耗时 {round(latency, 2)}s")
                 return True, req_size, res_size, latency
             else:
-                self._log(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求失败: {response_data}")
+                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求失败: {response_data}")
                 return False, req_size, res_size, latency
                 
         except requests.exceptions.Timeout:
-            self._log(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）")
+            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）")
             return False, req_size, 0, 0.0
         except Exception as e:
-            self._log(f"[REQ-{req_id}] - [{task_id} - {task_type}] 网络异常: {e}")
+            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] 网络异常: {e}")
             return False, req_size, 0, 0.0
         
     def run(self):
-        self._log(f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
+        self.logger.info(f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
         self.experiment_start_time = time.time()
         
         # 使用 Session 并挂载适配器，复用底层 TCP 连接，防止高并发时耗尽本地端口
@@ -77,7 +75,6 @@ class TraditionalClient:
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
-        # 引入多线程实现并发，与分布式系统保持一致的并发压力
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [executor.submit(self._send_single_request, i, session) for i in range(REQUEST_TIMES)]
             
@@ -126,6 +123,6 @@ Generated: {get_ts()}
   Network Overhead: {total_overhead_kb} KB (Approx. Sent + Received)
 ==================================================
 """
-        with open(f"{RESULT_DIR}/result.txt", "w", encoding="utf-8") as f: f.write(report)
-        self._log(f"实验报告已生成: {RESULT_DIR}/result.txt")
+        with open(f"{RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}", "w", encoding="utf-8") as f: f.write(report)
+        self.logger.info(f"实验报告已生成: {RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}")
 

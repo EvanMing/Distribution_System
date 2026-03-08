@@ -1,6 +1,8 @@
 from urllib3 import Retry
 from urllib.parse import urlparse, parse_qs
 
+
+
 class LoggedRetry(Retry):
     def __init__(self, *args, **kwargs):
         self.client = kwargs.pop('client', None)
@@ -24,6 +26,6 @@ class LoggedRetry(Retry):
                 self.client.retried_requests.add(req_id)
                 
                 retry_count = len(self.history) + 1
-                self.client._log("RETRY", f"[REQ-{req_id}] 触发自动重试 (第{retry_count}次)")
+                self.client.logger.warning(f"[REQ-{req_id}] 触发自动重试 (第{retry_count}次)")
             
         return super().increment(method, url, *args, **kwargs)

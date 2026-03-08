@@ -5,7 +5,7 @@ import sys
 
 from requests.adapters import HTTPAdapter
 
-from common.baseline import BACKOFF_FACTOR, CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from common.baseline import BACKOFF_FACTOR, CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, FAULT_QUEUE_POLL_TIME, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, WAIT_QUEUE_REPORT_TIME, get_ts
 from common.logger_config import setup_logger
 from distributed.client.RequestResult import RequestResult
 from distributed.client.LoggedRetry import LoggedRetry
@@ -41,17 +41,11 @@ class DistributedClient:
         self.running = True
         threading.Thread(target=self._async_worker, daemon=True).start()
 
-    def _log(self, level, msg):
-        if level.upper() == "INFO": self.logger.info(msg)
-        elif level.upper() == "ERROR": self.logger.error(msg)
-        elif level.upper() == "WARNING": self.logger.warning(msg)
-        else: self.logger.info(f"[{level}] {msg}")
-
     def _enqueue(self, req_id: str, task_id:str, task_type: str, timestamp:str):
         with open(QUEUE_FILE, "r") as f: q = json.load(f)
         q.append({"request_id": req_id, "task_type": task_type, 'task_id':task_id, "timestamp":timestamp})
         with open(QUEUE_FILE, "w") as f: json.dump(q, f)
-        self._log("QUEUE_ADD", f"[REQ-{req_id}] 异常记录已写入本地队列。")
+        self.logger.info(f"[REQ-{req_id}] 异常记录已写入本地队列。")
 
     def _async_worker(self):
         # 此处不进行任何性能和网络开销的统计，仅负责静默重试
@@ -61,25 +55,26 @@ class DistributedClient:
                 if q:
                     task = q[0]
                     req_id, task_id, task_type = task["request_id"], task["task_id"], task["task_type"]
-                    self._log("REPORTING", f"[REQ-{req_id}] 异步尝试向服务端上报异常记录 [{task_id} - {task_type}]...")
+                    self.logger.info(f"[REQ-{req_id}] 异步尝试向服务端上报异常记录 [{task_id} - {task_type}]...")
                     
                     res = requests.post(f"{self.gateway_url}/api/report", json=task)
                     
                     if res.status_code == 200:
                         json_res = res.json()
-                        self._log("REPORT_SUCCESS", f"[REQ-{req_id}] explaination: {json_res.get('explaination')}")
+                        self.logger.info(f"[REQ-{req_id}] explaination: {json_res.get('explaination')}")
                         if json_res.get('outcome') == 1:
-                            self._log("REPORT_SUCCESS", f"[REQ-{req_id}] 双向确认完成！从队列移除。")
+                            self.logger.info(f"[REQ-{req_id}] 双向确认完成！从队列移除。")
                             q.pop(0)
                             with open(QUEUE_FILE, "w") as f: json.dump(q, f)
                         else:
-                            self._log("REPORT_RETRY", f"[REQ-{req_id}] resent request again")
+                            self.logger.warning(f"[REQ-{req_id}] resent request again")
                             failed_task = q.pop(0)
                             q.append(failed_task)
                             with open(QUEUE_FILE, "w") as f: json.dump(q, f)
             except Exception as e:
-                self._log('WARNING', f"{e}")
-            time.sleep(2.0)
+                self.logger.info(f"{e}")
+                
+            time.sleep(FAULT_QUEUE_POLL_TIME)
 
     def _save_result(self):
         response_rate = round(self.success / REQUEST_TIMES * 100, 2) if REQUEST_TIMES > 0 else 0
@@ -117,8 +112,8 @@ Generated: {get_ts()}
   Network Overhead: {total_overhead_kb} KB (Approx. Sent + Received)
 ==================================================
 """
-        with open(f"{RESULT_DIR}/result.txt", "w", encoding="utf-8") as f: f.write(report)
-        self._log("EXPERIMENT", f"实验报告已生成: {RESULT_DIR}/result.txt\n")
+        with open(f"{RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}", "w", encoding="utf-8") as f: f.write(report)
+        self.logger.info(f"实验报告已生成: {RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}\n")
 
     def _send_single_request(self, i, session) -> RequestResult:
         req_id = f"{i+1:03d}"
@@ -193,7 +188,7 @@ Generated: {get_ts()}
         return session
     
     def run(self):
-        self._log('EXPERIMENT', f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
+        self.logger.info(f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
         self.experiment_start_time = time.time() 
         
         session = self._create_session_with_retries()
@@ -221,13 +216,14 @@ Generated: {get_ts()}
                     if server_note: self.server_cache_hits += 1
                     if gateway_note: self.gateway_degrade_hits += 1
                     
-                    self._log("SUCCESS", f'[REQ-{result.req_id}] 成功收到响应: ({response_data}) 耗时 {round(result.latency, 2)}s, server_cache: {server_note if server_note else "No"}, gateway_cache: {gateway_note if gateway_note else "No"}')
+                    self.logger.info(f'[REQ-{result.req_id}] 成功收到响应: ({response_data}) 耗时 {round(result.latency, 2)}s, server_cache: {server_note if server_note else "No"}, gateway_cache: {gateway_note if gateway_note else "No"}')
                 else:
-                    self._log("ERROR", f"[REQ-{result.req_id}] 请求超时（未收到响应）。上报服务端！")
+                    self.logger.error(f"[REQ-{result.req_id}] 请求超时（未收到响应）。上报服务端！")
                     self.failed += 1
                     self._enqueue(result.req_id, result.task_id, result.task_type, get_ts())
 
         self.experiment_end_time = time.time()
-        time.sleep(8.0) 
+        # 等待异常日志全部上报
+        time.sleep(WAIT_QUEUE_REPORT_TIME) 
         self.running = False
         self._save_result()

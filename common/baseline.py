@@ -59,6 +59,11 @@ REQUEST_TIMES = 30
 RETRY_TIMES = 1
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
 
+EXPERIMENT_RESULT_FILE_NAME = 'result.txt'
+
+FAULT_QUEUE_POLL_TIME = 2
+WAIT_QUEUE_REPORT_TIME = 8
+
 #-----------------------------client---------------------
 
 def get_ts() -> str: 

@@ -64,25 +64,18 @@ The system generates a detailed `result.txt` in the `experiment_results/` direct
 ## ⚙️ Quick Start
 
 ### step 1: Create a .env file in the root directory:
-   * VALKEY_ENDPOINT=your-redis-host
-   * RDS_HOST=your-mysql-host
-   * RDS_USER=root
-   * RDS_PASSWORD=your-password
-   * RDS_DB_NAME=gatewaycache
-   * FIREBASE_CERT_PATH=serviceAccountKey.json
+* VALKEY_ENDPOINT=your-redis-host
+* RDS_HOST=your-mysql-host
+* RDS_USER=root
+* RDS_PASSWORD=your-password
+* RDS_DB_NAME=gatewaycache
+* FIREBASE_CERT_PATH=serviceAccountKey.json
 
 ### step 2: install essential packages
-   * # 1. 更新系统源
-   * sudo apt update -y
-   * # 2. 安装核心工具（Python 基础包、Git、Nginx）
-   * sudo apt install -y python3-pip python3-dev git nginx
-   * # 3. 安装虚拟环境所需依赖（Ubuntu 推荐方式）
-   * sudo apt install -y python3-venv python3-full
-   * # 4. 创建虚拟环境
-   * python3 -m venv group_6
-   * # 5. 激活虚拟环境
-   * source group_6/bin/activate
-   * # 6. 一次性安装所有 Python 依赖（合并了原来的多条命令）
-   * pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv
-   * # 7. 验证安装
-   * python --version && uvicorn --version && pip list | grep fastapi
+* sudo apt update -y # 1. 更新系统源
+* sudo apt install -y python3-pip python3-dev git nginx # 2. 安装核心工具（Python 基础包、Git、Nginx）
+* sudo apt install -y python3-venv python3-full # 3. 安装虚拟环境所需依赖（Ubuntu 推荐方式）
+* python3 -m venv group_6 # 4. 创建虚拟环境
+* source group_6/bin/activate # 5. 激活虚拟环境
+* pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv # 6. 一次性安装所有 Python 依赖（合并了原来的多条命令）
+* python --version && uvicorn --version && pip list | grep fastapi # 7. 验证安装

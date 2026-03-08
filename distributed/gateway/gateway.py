@@ -292,8 +292,28 @@ class DistributedGateway:
         # 绝不会阻塞主事件循环。既然你用了同步的 requests.post，就要去掉 async。
         @self.app.post("/api/report")
         def report(payload: Dict[str, Any] = Body(...)):
-            return requests.post(f"{self.server_url}/api/report_fault", json=payload).json()
+            # 同样根据熔断状态动态选择
+            target_url = getattr(self, 'backup_server_url', self.server_url) if getattr(self, 'is_circuit_open', False) else self.server_url
+            return requests.post(f"{target_url}/api/report_fault", json=payload).json()
 
+        @self.app.post("/api/register_device")
+        async def register_device(payload: Dict[str, Any] = Body(...)):
+            # 动态选择目标服务器：如果主节点熔断，就转给备用节点
+            # (这里使用 getattr 兼容你可能还没加完的 circuit_open 变量)
+            target_url = getattr(self, 'backup_server_url', self.server_url) if getattr(self, 'is_circuit_open', False) else self.server_url
+            
+            forward_url = f"{target_url}/api/register_device"
+            self.logger.info(f"网关收到 Android 设备注册请求，正在转发至: {forward_url}")
+            
+            try:
+                # 复用网关已有的异步 httpx client 进行转发
+                res = await self.client.post(forward_url, json=payload, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
+                res.raise_for_status() # 如果 HTTP 状态码不是 200 系列则抛出异常
+                return res.json()
+            except Exception as e:
+                self.logger.warning(f"转发设备注册请求失败: {e}")
+                return {"status": "failed", "msg": f"Gateway forward failed: {e}"}
+        
         self.logger.info(f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
         

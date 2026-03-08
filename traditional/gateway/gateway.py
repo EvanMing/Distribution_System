@@ -26,7 +26,7 @@ class TraditionalGateway:
 
     def run(self):
         @self.app.get("/api/forward")
-        async def forward(request_id: str, task_id: str = "unknown", task_type: str = "default"):
+        def forward(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             self._log(f"[REQ-{request_id}] 转发 {task_type} 请求至服务端")
             params = {"request_id": request_id, "task_id": task_id, "task_type": task_type}
             

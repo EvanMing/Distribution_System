@@ -25,7 +25,7 @@ class TraditionalServer:
 
     def run(self):
         @self.app.get("/api/process")
-        async def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
+        def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
             # 模拟识别 ML 任务
             self._log(f"[REQ-{request_id}] 接收请求。TaskID: {task_id}, 任务类型: {task_type}")
             time.sleep(TASK_COST)

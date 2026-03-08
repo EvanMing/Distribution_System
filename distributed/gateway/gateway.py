@@ -86,20 +86,20 @@ class DistributedGateway:
     def _init_db(self):
         """初始化 RDS 降级缓存表"""
         try:
-            connection = self._get_db_connection()
-            with connection.cursor() as cursor:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS task_cache (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        task_type VARCHAR(255) NOT NULL,
-                        task_id VARCHAR(20) NOT NULL,
-                        response_data JSON NOT NULL,
-                        ts DOUBLE NOT NULL,
-                        INDEX idx_task_type (task_type)
-                    )
-                ''')
-            connection.commit()
-            connection.close() # 释放回连接池
+            # 使用 with closing 安全管理数据库连接的释放
+            with closing(self._get_db_connection()) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(f'''
+                        CREATE TABLE IF NOT EXISTS {RDS_DB_TABLE} (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            task_type VARCHAR(255) NOT NULL,
+                            task_id VARCHAR(20) NOT NULL,
+                            response_data JSON NOT NULL,
+                            ts DOUBLE NOT NULL,
+                            INDEX idx_task_type (task_type)
+                        )
+                    ''')
+                connection.commit()
             self.logger.info(f"已成功连接并挂载 AWS RDS MySQL")
         except Exception as e:
             self.logger.warning(f"RDS 数据库初始化失败，请检查网络或白名单: {e}")
@@ -136,25 +136,21 @@ class DistributedGateway:
         self.executor.submit(_do_save)
             
     def _get_from_cache(self, task_type: str, task_id: str) -> dict:
-        
-        connection = None
         try:
-            connection = self._get_db_connection()
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    'SELECT response_data FROM task_cache WHERE task_type = %s AND task_id = %s ORDER BY ts DESC LIMIT 1',
-                    (task_type, task_id)
-                )
-                row = cursor.fetchone()
+            # 【修改 2】使用 with closing 安全管理数据库连接
+            with closing(self._get_db_connection()) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f'SELECT response_data FROM {RDS_DB_TABLE} WHERE task_type = %s AND task_id = %s ORDER BY ts DESC LIMIT 1',
+                        (task_type, task_id)
+                    )
+                    row = cursor.fetchone()
                 
             if row:
                 data = row['response_data']
                 return json.loads(data) if isinstance(data, str) else data
         except Exception as e:
             self.logger.warning(f"读取 RDS 缓存失败: {e}")
-        finally:
-            if connection:
-                connection.close()
         return None
 
     def _clear_cache_table(self):
@@ -172,29 +168,19 @@ class DistributedGateway:
     def _export_cache_to_csv(self, filename: str = "gateway_task_cache.csv"):
         try:
             query = f"SELECT * FROM {RDS_DB_TABLE}"
-            connection = self._get_db_connection()
             
-            data = None
-            
-            with connection.cursor() as cursor:
-                cursor.execute(query)
-                # fetchall() 拿到的直接是形如 [{'id': 1, 'task_type': '...'}, {...}] 的数据
-                data = cursor.fetchall()
-            
-            connection.close() 
+            with closing(self._get_db_connection()) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(query)
+                    data = cursor.fetchall()
             
             if not data:
                 self.logger.info("RDS 缓存表为空，没有数据可导出。")
+                return pd.DataFrame()
             
             df = pd.DataFrame(data)
-            if not df.empty:
-                # index=False 表示不导出 DataFrame 的行索引
-                # encoding='utf-8-sig' 可以完美兼容 Windows Excel，防止中文乱码
-                df.to_csv(filename, index=False, encoding='utf-8-sig')
-                self.logger.info(f"成功从 RDS 导出数据，总计: {len(df)} 行，已保存至: {filename}")
-            else:
-                self.logger.info("RDS 缓存表为空，没有数据可导出。")
-                
+            df.to_csv(filename, index=False, encoding='utf-8-sig')
+            self.logger.info(f"成功从 RDS 导出数据，总计: {len(df)} 行，已保存至: {filename}")
             return df
             
         except Exception as e:

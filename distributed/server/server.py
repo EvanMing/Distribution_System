@@ -39,6 +39,7 @@ class DistributedServer:
         self._init_alert_system()
 
     def _init_redis(self):
+        global IS_REDIS_CONNECTED 
         self.logger.info(f"init Redis...")
         try:
             redis_client.ping()

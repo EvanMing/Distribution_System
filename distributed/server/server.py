@@ -150,7 +150,7 @@ class DistributedServer:
                             'Args': [
                                 'spark-submit',
                                 '--deploy-mode', 'cluster',
-                                f'{S3_BUCKET}/criminal_classification.py'  # S3 上的脚本路径
+                                f'{S3_BUCKET}/crime_classification.py'  # S3 上的脚本路径
                             ]
                         }
                     }

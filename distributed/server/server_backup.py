@@ -293,7 +293,7 @@ class DistributedBackupServer:
                 self._push_to_alert_system(
                     task_id=task_id,
                     task_type=task_type,
-                    task_priority="high",
+                    task_priority="low",
                     req_id=request_id,
                     timestamp=get_ts(),
                     reason=reason

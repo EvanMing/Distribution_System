@@ -9,7 +9,10 @@ import boto3
 
 def main():
     
-    S3_BUCKET = "s3://distributed-system-bucket-project"
+    # Spark 读取用：带 s3://
+    S3_PATH_PREFIX = "s3://distributed-system-bucket-project"
+    # boto3 上传用：不带 s3://
+    S3_BUCKET_NAME = "distributed-system-bucket-project"
     
     # 1. Initialize SparkSession
     spark = SparkSession.builder \
@@ -22,8 +25,8 @@ def main():
     print("Loading data...")
     
     # 2. Load the dataset (using sep="\t" and quote="" to bypass dirty data formatting)
-    train_df = spark.read.csv(f"{S3_BUCKET}/train(in).csv", header=True, sep="\t", quote="")
-    test_df = spark.read.csv(f"{S3_BUCKET}/test(in).csv", header=True, sep="\t", quote="")
+    train_df = spark.read.csv(f"{S3_PATH_PREFIX}/train(in).csv", header=True, sep="\t", quote="")
+    test_df = spark.read.csv(f"{S3_PATH_PREFIX}/test(in).csv", header=True, sep="\t", quote="")
 
     # Filter out missing values in target and feature columns
     train_df = train_df.dropna(subset=["Category", "Description"])
@@ -92,9 +95,9 @@ def main():
     
     output_filename = f"results/evaluation_results_{int(time.time())}.txt"
     
-    s3_client = boto3.client('s3')
+    s3_client = boto3.client('s3', region_name='us-east-1')
     s3_client.put_object(
-    Bucket="your-ml-data-bucket", 
+    Bucket=S3_BUCKET_NAME, 
     Key = output_filename, 
     Body = result_text)
     

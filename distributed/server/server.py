@@ -10,7 +10,7 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_ID, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response, submit_emr_spark_job
+from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_ID, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, S3_BUCKET, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response
 from common.logger_config import setup_logger
 
 import boto3
@@ -30,9 +30,6 @@ redis_client = redis.Redis(
 )
 
 IS_REDIS_CONNECTED = False
-
-
-S3_BUCKET = "s3://distributed-system-bucket-project"
 
 # 初始化 EMR 客户端
 emr_client = boto3.client(

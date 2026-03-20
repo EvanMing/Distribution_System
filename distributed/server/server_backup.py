@@ -11,7 +11,7 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_ID, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response
+from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_ID, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, S3_BUCKET, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response
 from common.logger_config import setup_logger
 
 LOG_PATH = "logs/distributed/server_backup.log"
@@ -45,7 +45,7 @@ def submit_emr_spark_job(task_id: str):
                         'Args': [
                             'spark-submit',
                             '--deploy-mode', 'cluster',
-                            's3://your-ml-data-bucket/scripts/criminal_classification.py' # S3 上的脚本路径
+                            f'{S3_BUCKET}/criminal_classification.py' # S3 上的脚本路径
                         ]
                     }
                 }

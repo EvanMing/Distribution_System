@@ -115,9 +115,9 @@ class DistributedServer:
         
         # 从 AWS 查询集群 ID
         try:
+            # 修改点：删除了 MaxResults=10
             response = self.emr_client.list_clusters(
-                ClusterStates=['RUNNING', 'WAITING'],
-                MaxResults=10
+                ClusterStates=['RUNNING', 'WAITING']
             )
             for cluster in response['Clusters']:
                 if cluster['Name'] == EMR_CLUSTER_NAME:

@@ -156,6 +156,8 @@ S3_BUCKET = "s3://distributed-system-bucket-project"
 
 # ================= EMR 配置 ===============================  
 
-EMR_CLUSTER_ID = "distributed-system-cluster"
+EMR_CLUSTER_NAME  = "distributed-system-cluster"
+
+EMR_TIMEOUT = 7200
 
 # ========================================================== 

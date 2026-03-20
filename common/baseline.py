@@ -159,5 +159,5 @@ S3_BUCKET = "s3://distributed-system-bucket-project"
 EMR_CLUSTER_NAME  = "distributed-system-cluster"
 
 EMR_TIMEOUT = 7200
-
+QUERY_INTERVAL = 30
 # ========================================================== 

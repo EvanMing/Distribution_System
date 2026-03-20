@@ -11,7 +11,7 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_NAME, EMR_TIMEOUT, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, S3_BUCKET, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response
+from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_NAME, EMR_TIMEOUT, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, QUERY_INTERVAL, REDIS_PORT, S3_BUCKET, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response
 from common.logger_config import setup_logger
 
 import boto3
@@ -206,12 +206,12 @@ class DistributedServer:
     async def _monitor_emr_task(self, step_id: str, request_id: str, task_id: str, task_type: str):
         """异步后台任务：轮询 EMR 状态并在完成后触发 Firebase（增加超时保护）"""
         self.logger.info(f"[REQ-{request_id}] 开始后台监控 EMR 任务: {step_id}")
-        # 新增：超时保护（建议设为2小时，可根据业务调整）
+        # 新增：超时保护
         
         start_time = datetime.datetime.now()
         
         while True:
-            # 1. 超时检查（优先退出，避免无限循环）
+            # 1. 超时检查
             elapsed = (datetime.datetime.now() - start_time).total_seconds()
             if elapsed > EMR_TIMEOUT:
                 self.logger.warning(f"[REQ-{request_id}] EMR 任务 {step_id} 监控超时（{EMR_TIMEOUT}秒）")
@@ -262,7 +262,7 @@ class DistributedServer:
                 continue
             
             # 4. 未完成：睡 30 秒再查
-            await asyncio.sleep(30)
+            await asyncio.sleep(QUERY_INTERVAL)
 
     def _makeup_fault_response(self,outcome,task_priority,explaination):
         return {"status": "success", 'outcome':outcome, 'task_priority':task_priority, 'explaination':explaination}

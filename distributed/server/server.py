@@ -38,7 +38,6 @@ S3_BUCKET = "s3://distributed-system-bucket-project"
 emr_client = boto3.client(
     'emr', 
     region_name='us-east-1',
-    endpoint_url='https://emr.us-east-1.amazonaws.com'  
 )
 
 def submit_emr_spark_job(task_id: str):

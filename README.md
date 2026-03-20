@@ -84,7 +84,7 @@ project_root/
 * sudo apt install -y python3-venv python3-full # 3. 安装虚拟环境所需依赖（Ubuntu 推荐方式）
 * python3 -m venv group_6 # 4. 创建虚拟环境
 * source group_6/bin/activate # 5. 激活虚拟环境
-* pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv # 6. 一次性安装所有 Python 依赖
+* pip install fastapi uvicorn requests dnspython redis firebase-admin pymysql python-dotenv boto3 # 6. 一次性安装所有 Python 依赖
 * python --version && uvicorn --version && pip list | grep fastapi # 7. 验证安装
   
 * windows command, local verification

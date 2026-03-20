@@ -107,6 +107,16 @@ class DistributedServer:
                     self.logger.info(f"告警已推送到 Android 应用，MessageID: {response}")
                 except Exception as e:
                     self.logger.warning(f"推送失败: {e}")
+                    
+                    error_msg = str(e).lower()
+                    if "not found" in error_msg or "unregistered" in error_msg:
+                        if IS_REDIS_CONNECTED:
+                            # 从 Redis 集合中剔除这个死掉的 Token
+                            redis_client.srem("alert_system:tokens", token)
+                            self.logger.info(f"已自动从 Redis 清理失效的 Android Token: {token[:15]}...")
+                        elif token in alert_system_token_set:
+                            # 降级模式下的本地内存清理
+                            alert_system_token_set.remove(token)
 
     def _get_cluster_id(self) -> str:
         """获取 EMR 集群 ID（带缓存）"""

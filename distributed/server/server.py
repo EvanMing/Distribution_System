@@ -10,8 +10,11 @@ import uvicorn
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from common.baseline import ACTIVE_REDIS_HOST, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, makeup_response
+from common.baseline import ACTIVE_REDIS_HOST, EMR_CLUSTER_ID, FAULT_LEVEL, FAULT_REASON, FIREBASE_CERT_PATH, IDEMPOTENCY_EXPIRE, REDIS_PORT, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, get_ts, makeup_response, submit_emr_spark_job
 from common.logger_config import setup_logger
+
+import boto3
+from fastapi import BackgroundTasks
 
 LOG_PATH = "logs/distributed/server.log"
 
@@ -27,6 +30,41 @@ redis_client = redis.Redis(
 )
 
 IS_REDIS_CONNECTED = False
+
+
+S3_BUCKET = "s3://distributed-system-bucket-project"
+
+# 初始化 EMR 客户端
+emr_client = boto3.client(
+    'emr', 
+    region_name='us-east-1',
+    endpoint_url='https://emr.us-east-1.amazonaws.com'  
+)
+
+def submit_emr_spark_job(task_id: str):
+    try:
+        response = emr_client.add_job_flow_steps(
+            JobFlowId=EMR_CLUSTER_ID,
+            Steps=[
+                {
+                    'Name': f'Spark_Crime_Classification_{task_id}',
+                    'ActionOnFailure': 'CONTINUE', # 失败不关停集群
+                    'HadoopJarStep': {
+                        'Jar': 'command-runner.jar',
+                        'Args': [
+                            'spark-submit',
+                            '--deploy-mode', 'cluster',
+                            f'{S3_BUCKET}/criminal_classification.py' # S3 上的脚本路径
+                        ]
+                    }
+                }
+            ]
+        )
+        return response['StepIds'][0]
+    except Exception as e:
+        # 这里可以通过现有的 Firebase _push_to_alert_system 发送报警
+        print(f"EMR 提交失败: {e}")
+        return None
 
 class DistributedServer:
     
@@ -98,13 +136,66 @@ class DistributedServer:
                 except Exception as e:
                     self.logger.warning(f"推送失败: {e}")
 
+    def _check_emr_status_sync(self, step_id: str):
+        """同步方法：调用 AWS SDK 查询 EMR 状态"""
+        try:
+            response = emr_client.describe_step(
+                ClusterId=EMR_CLUSTER_ID,
+                StepId=step_id
+            )
+            return response['Step']['Status']['State']
+        except Exception as e:
+            self.logger.warning(f"查询 EMR 状态失败: {e}")
+            return "UNKNOWN"
+        
+    async def _monitor_emr_task(self, step_id: str, request_id: str, task_id: str, task_type: str):
+        """异步后台任务：轮询 EMR 状态并在完成后触发 Firebase"""
+        self.logger.info(f"[REQ-{request_id}] 开始后台监控 EMR 任务: {step_id}")
+        
+        while True:
+            # 1. 使用 to_thread 防止同步的网络 IO 阻塞主事件循环
+            state = await asyncio.to_thread(self._check_emr_status_sync, step_id)
+            self.logger.info(f"[REQ-{request_id}] EMR 任务 {step_id} 当前状态: {state}")
+            
+            # 2. 判断状态
+            if state == 'COMPLETED':
+                self.logger.info(f"[REQ-{request_id}] EMR 任务执行成功！准备推送 Firebase。")
+                
+                # 可选：如果你把 evaluation_results.txt 存到了 S3，你甚至可以在这里用 boto3 从 S3 读出准确率，放进 reason 里发给客户端
+                reason = f"Spark ML Task completed successfully. Results saved to S3."
+                
+                self._push_to_alert_system(
+                    task_id=task_id,
+                    task_type=task_type,
+                    task_priority="high", # 成功跑完，高优先级通知
+                    req_id=request_id,
+                    timestamp=get_ts(),
+                    reason=reason
+                )
+                break # 退出轮询
+                
+            elif state in ['FAILED', 'CANCELLED', 'INTERRUPTED']:
+                self.logger.error(f"[REQ-{request_id}] EMR 任务执行失败，状态: {state}")
+                self._push_to_alert_system(
+                    task_id=task_id,
+                    task_type=task_type,
+                    task_priority="emergency", # 故障，紧急通知
+                    req_id=request_id,
+                    timestamp=get_ts(),
+                    reason=f"Spark job failed on EMR with state: {state}"
+                )
+                break # 退出轮询
+                
+            # 3. 如果还在 'PENDING' 或 'RUNNING'，睡 30 秒再查，避免把 AWS 接口查限流了
+            await asyncio.sleep(30)
+
     def _makeup_fault_response(self,outcome,task_priority,explaination):
         return {"status": "success", 'outcome':outcome, 'task_priority':task_priority, 'explaination':explaination}
 
     def run(self):
         
         @self.app.get("/api/process")
-        async def process(request_id: str, task_id: str = "unknown", task_type: str = "default"):
+        async def process(request_id: str, background_tasks: BackgroundTasks, task_id: str = "unknown", task_type: str = "default"):
             self.logger.info(f"[REQ-{request_id}] 接收请求。TaskID: {task_id}, 任务类型: {task_type}")
             
             # ================= 核心：幂等性校验 =================
@@ -121,16 +212,38 @@ class DistributedServer:
                 return cached_response
             
             # =================================================
-
-            # 2. 如果是新任务，往下执行业务处理
-            # 将同步阻塞替换为异步非阻塞
-            await asyncio.sleep(TASK_COST)
             
-            final_response = makeup_response(task_type=task_type)
-            
-            if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
-                redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
-                self.logger.info(f"[REQ-{request_id}] {task_type} 处理完毕，结果已固化至 Redis。") 
+            if task_type == TASK_CRIMINAL_CLASSIFICATION:
+                # 提交到 EMR
+                step_id = submit_emr_spark_job(task_id)
+                
+                if step_id:
+                    # 关键一步：把监控任务扔给 FastAPI 的后台去慢慢跑，不要卡住当前的 return
+                    background_tasks.add_task(
+                        self._monitor_emr_task, 
+                        step_id=step_id, 
+                        request_id=request_id, 
+                        task_id=task_id, 
+                        task_type=task_type
+                    )
+                    
+                    final_response = {
+                        "status": "success", 
+                        "message": "Task submitted to EMR. You will be notified via Firebase upon completion.",
+                        "emr_step_id": step_id
+                    }
+                else:
+                    final_response = {"status": "failed", "message": "Failed to submit EMR step"}
+            else:
+                # 2. 如果是新任务，往下执行业务处理
+                # 将同步阻塞替换为异步非阻塞
+                await asyncio.sleep(TASK_COST)
+                
+                final_response = makeup_response(task_type=task_type)
+                
+                if final_response.get('status')=='success' and IS_REDIS_CONNECTED:
+                    redis_client.set(idem_key, json.dumps(final_response), nx=True, ex=IDEMPOTENCY_EXPIRE)
+                    self.logger.info(f"[REQ-{request_id}] {task_type} 处理完毕，结果已固化至 Redis。") 
             
             return final_response
 

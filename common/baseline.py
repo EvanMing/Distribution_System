@@ -61,7 +61,8 @@ BACKOFF_FACTOR = 0.3
 MAX_WORKERS = 5
 REQUEST_TIMES = 30
 RETRY_TIMES = 1
-ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
+TASK_CRIMINAL_CLASSIFICATION = 'Criminal_Classification'
+ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment", TASK_CRIMINAL_CLASSIFICATION]
 
 EXPERIMENT_RESULT_FILE_NAME = 'result.txt'
 
@@ -146,4 +147,14 @@ RDS_PORT = 3306
 # ==========================================================       
     
     
+# ================= S3 配置 ===============================  
+
+
+# ========================================================== 
     
+
+# ================= EMR 配置 ===============================  
+
+EMR_CLUSTER_ID = "distributed-system-cluster"
+
+# ========================================================== 

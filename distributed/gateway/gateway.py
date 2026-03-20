@@ -23,7 +23,7 @@ from dbutils.pooled_db import PooledDB
 
 from common.baseline import (ATTEMPT_TIMES, DOWNSTREAM_FAULT_PROB, FAIL_THRESHOLD, GATEWAY_FORWARD_RESPONSE_TIMEOUT, GATEWAY_MAX_WORKERS, 
                              MAX_CACHE_SIZE, RDS_DB_NAME, RDS_DB_TABLE, RDS_HOST, RDS_PASSWORD, 
-                             RDS_PORT, RDS_USER, RESPIRED_TIME, TIME_SLEEP, UPSTREAM_FAULT_PROB, WINDOW_SIZE )
+                             RDS_PORT, RDS_USER, RESPIRED_TIME, TASK_CRIMINAL_CLASSIFICATION, TIME_SLEEP, UPSTREAM_FAULT_PROB, WINDOW_SIZE )
 from common.logger_config import setup_logger
 
 LOG_PATH = "logs/distributed/gateway.log"
@@ -245,7 +245,7 @@ class DistributedGateway:
                     res = await self.client.get(f"{target_url}/api/process", params=params, timeout=GATEWAY_FORWARD_RESPONSE_TIMEOUT)
                     self.logger.info(f"[REQ-{request_id}] [第 {attempt} 次尝试]")
                     
-                    if random.random() < local_upstream_fault_prob:
+                    if random.random() < local_upstream_fault_prob and task_type != TASK_CRIMINAL_CLASSIFICATION:
                         self.logger.error(f"[REQ-{request_id}] 模拟上游网络丢包。触发网关对 {task_type} 任务的自适应重试！")
                         raise httpx.TimeoutException("Simulated upstream loss") # 抛出 httpx 的超时异常
                     
@@ -282,7 +282,7 @@ class DistributedGateway:
                     self.logger.error(f"[REQ-{request_id}] RDS 中无 {task_type} 缓存，请求彻底失败。")
                     success_response = self._makeup_response()
                 
-            if random.random() < DOWNSTREAM_FAULT_PROB:
+            if random.random() < DOWNSTREAM_FAULT_PROB and task_type != TASK_CRIMINAL_CLASSIFICATION:
                 self.logger.error(f"[REQ-{request_id}] 模拟下游网络丢包(Gateway->Client)。导致客户端超时！")
                 await asyncio.sleep(TIME_SLEEP)
                 

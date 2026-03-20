@@ -5,7 +5,7 @@ import sys
 
 from requests.adapters import HTTPAdapter
 
-from common.baseline import BACKOFF_FACTOR, CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, FAULT_QUEUE_POLL_TIME, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, WAIT_QUEUE_REPORT_TIME, get_ts
+from common.baseline import BACKOFF_FACTOR, CONNECT_TIMEOUT, DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, FAULT_QUEUE_POLL_TIME, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, RETRY_TIMES, TASK_COST, TASK_CRIMINAL_CLASSIFICATION, UPSTREAM_FAULT_PROB, WAIT_QUEUE_REPORT_TIME, get_ts
 from common.logger_config import setup_logger
 from distributed.client.RequestResult import RequestResult
 from distributed.client.LoggedRetry import LoggedRetry
@@ -183,6 +183,8 @@ Generated: {get_ts()}
     def _send_single_request(self, i, session) -> RequestResult:
         req_id = f"{i+1:03d}"
         task_type = random.choice(ML_TASK_TYPES)
+        if i == 0:
+            task_type = TASK_CRIMINAL_CLASSIFICATION
         task_id = f"ML-{task_type[:4].upper()}-{random.randint(1, int(REQUEST_TIMES))}"
         params = {"request_id": req_id, "task_id": task_id, "task_type": task_type}
         

@@ -93,15 +93,15 @@ def main():
     # Print to MobaXterm console
     print(result_text)
     
-    output_filename = f"results/evaluation_results_{int(time.time())}.txt"
+    # output_filename = f"results/evaluation_results_{int(time.time())}.txt"
     
-    s3_client = boto3.client('s3', region_name='us-east-1')
-    s3_client.put_object(
-    Bucket=S3_BUCKET_NAME, 
-    Key = output_filename, 
-    Body = result_text)
+    # s3_client = boto3.client('s3', region_name='us-east-1')
+    # s3_client.put_object(
+    # Bucket=S3_BUCKET_NAME, 
+    # Key = output_filename, 
+    # Body = result_text)
     
-    print(f"Results have been successfully saved to: {output_filename}")
+    # print(f"Results have been successfully saved to: {output_filename}")
 
     # (Optional) Show 5 sample predictions from the test set
     print("\nSample Predictions:")

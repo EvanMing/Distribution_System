@@ -74,7 +74,7 @@ def submit_emr_spark_job(task_id: str):
                         'Jar': 'command-runner.jar',
                         'Args': [
                             'spark-submit',
-                            '--deploy-mode', 'cluster',
+                            '--deploy-mode', 'client',
                             f'{S3_BUCKET}/crime_classification.py'  # S3 上的脚本路径
                         ]
                     }

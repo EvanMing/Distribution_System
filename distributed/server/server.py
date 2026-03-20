@@ -198,11 +198,11 @@ class DistributedServer:
         self.logger.info(f"[REQ-{request_id}] 开始后台监控 EMR 任务: {step_id}")
         # 新增：超时保护（建议设为2小时，可根据业务调整）
         
-        start_time = datetime.now()
+        start_time = datetime.datetime.now()
         
         while True:
             # 1. 超时检查（优先退出，避免无限循环）
-            elapsed = (datetime.now() - start_time).total_seconds()
+            elapsed = (datetime.datetime.now() - start_time).total_seconds()
             if elapsed > EMR_TIMEOUT:
                 self.logger.warning(f"[REQ-{request_id}] EMR 任务 {step_id} 监控超时（{EMR_TIMEOUT}秒）")
                 self._push_to_alert_system(
@@ -280,7 +280,7 @@ class DistributedServer:
             
             if task_type == TASK_CRIMINAL_CLASSIFICATION:
                 # 提交到 EMR
-                step_id = submit_emr_spark_job(task_id)
+                step_id = await asyncio.to_thread(self.submit_emr_spark_job, task_id)
                 
                 if step_id:
                     # 关键一步：把监控任务扔给 FastAPI 的后台去慢慢跑，不要卡住当前的 return

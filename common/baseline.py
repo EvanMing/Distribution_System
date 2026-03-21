@@ -64,6 +64,9 @@ RETRY_TIMES = 1
 TASK_CRIMINAL_CLASSIFICATION = 'Criminal_Classification'
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment", TASK_CRIMINAL_CLASSIFICATION]
 
+ML_TASK_TYPES_TRADITIONAL = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
+
+
 EXPERIMENT_RESULT_FILE_NAME = 'result.txt'
 
 FAULT_QUEUE_POLL_TIME = 2

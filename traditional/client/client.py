@@ -2,7 +2,7 @@ import random
 import requests, time, os
 import sys
 
-from common.baseline import DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, MAX_WORKERS, ML_TASK_TYPES, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
+from common.baseline import DOWNSTREAM_FAULT_PROB, EXPERIMENT_RESULT_FILE_NAME, MAX_WORKERS, ML_TASK_TYPES_TRADITIONAL, REQUEST_TIMEOUT, REQUEST_TIMES, TASK_COST, UPSTREAM_FAULT_PROB, get_ts
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
@@ -33,7 +33,7 @@ class TraditionalClient:
     def _send_single_request(self, i: int, session: requests.Session):
         """处理单次请求的逻辑"""
         req_id = f"{i+1:03d}"
-        task_type = random.choice(ML_TASK_TYPES)   
+        task_type = random.choice(ML_TASK_TYPES_TRADITIONAL)   
         task_id = f"ML-{task_type[:4].upper()}-{random.randint(1, int(REQUEST_TIMES))}"
         
         params = {"request_id": req_id, "task_id": task_id, "task_type": task_type}
@@ -107,7 +107,7 @@ Generated: {get_ts()}
   Gateway Address          : {self.gateway_url}
   Client Timeout           : {REQUEST_TIMEOUT}s
   Total Requests           : {REQUEST_TIMES}
-  Simulated Tasks          : [{", ".join(ML_TASK_TYPES)}]
+  Simulated Tasks          : [{", ".join(ML_TASK_TYPES_TRADITIONAL)}]
   Mimic Fault Config       : Upstream {UPSTREAM_FAULT_PROB*100}%) + Downstream ({DOWNSTREAM_FAULT_PROB*100}%)
   Server Handler Per Task  : {TASK_COST}s
 ==================================================

@@ -149,7 +149,7 @@ RDS_PORT = 3306
     
 # ================= S3 Configuration ===============================  
 
-S3_BUCKET = "s3://distributed-system-bucket-project"
+S3_BUCKET = "s3://cloud-based-distributed-system-bucket-project"
 
 # ========================================================== 
     

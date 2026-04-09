@@ -22,7 +22,7 @@ class TraditionalGateway:
         
         @self.app.get("/api/forward")
         def forward(request_id: str, task_id: str = "unknown", task_type: str = "default"):
-            self.logger.info(f"[REQ-{request_id}] 转发 {task_type} 请求至服务端")
+            self.logger.info(f"[REQ-{request_id}] Forwarding {task_type} request to server")
             params = {"request_id": request_id, "task_id": task_id, "task_type": task_type}
             
             try:
@@ -30,19 +30,17 @@ class TraditionalGateway:
                 result = res.json()
 
                 if random.random() < UPSTREAM_FAULT_PROB:
-                    self.logger.error(f"[REQ-{request_id}] [FAULT] 模拟上游网络丢包。无重试，直接失败。")
+                    self.logger.error(f"[REQ-{request_id}] [FAULT] Simulating upstream network packet loss. No retry, direct failure.")
                     time.sleep(TIME_SLEEP) 
 
                 if random.random() < DOWNSTREAM_FAULT_PROB:
-                    self.logger.error(f"[REQ-{request_id}] [FAULT] 模拟下游网络丢包，客户端超时。")
+                    self.logger.error(f"[REQ-{request_id}] [FAULT] Simulating downstream network packet loss, client timeout.")
                     time.sleep(TIME_SLEEP) 
 
                 return result
             except Exception as e:
-                self.logger.warning(f"[REQ-{request_id}] 转发异常：{str(e)}")
+                self.logger.warning(f"[REQ-{request_id}] Forwarding exception: {str(e)}")
                 return { "status": "failed",'response_data':'gateway timeout'}
 
-        self.logger.info(f"网关启动，监听 {self.gateway_host}:{self.gateway_port} ...")
+        self.logger.info(f"Gateway starting, listening on {self.gateway_host}:{self.gateway_port} ...")
         uvicorn.run(self.app, host=self.gateway_host, port=self.gateway_port, log_level="error")
-        
-        

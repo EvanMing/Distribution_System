@@ -14,18 +14,18 @@ class LoggedRetry(Retry):
 
     def increment(self, method, url, *args, **kwargs):
         if self.client and url:
-            # 从 URL 中提取查询参数
+            # Extract query parameters from URL
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
             
-            # 提取 request_id（parse_qs 返回的是列表，取第一个）
+            # Extract request_id (parse_qs returns a list, take the first element)
             req_ids = query_params.get('request_id')
             if req_ids:
                 req_id = req_ids[0]
-                # 将 req_id 加入集合，集合会自动去重
+                # Add req_id to the set, duplicates are automatically handled by the set
                 self.client.retried_requests.add(req_id)
                 
                 retry_count = len(self.history) + 1
-                self.client.logger.warning(f"[REQ-{req_id}] 触发自动重试 (第{retry_count}次)")
+                self.client.logger.warning(f"[REQ-{req_id}] Automatic retry triggered (attempt {retry_count})")
             
         return super().increment(method, url, *args, **kwargs)

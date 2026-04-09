@@ -1,4 +1,3 @@
-
 import datetime
 import random
 import socket
@@ -37,7 +36,6 @@ TASK_COST = 0.2
 
 #-----------------------------server---------------------
 
-
 #-----------------------------gateway--------------------
 
 UPSTREAM_FAULT_PROB = 0.4
@@ -46,8 +44,8 @@ TIME_SLEEP = 3.1
 RESPIRED_TIME = 0.2
 GATEWAY_MAX_WORKERS = 10
 GATEWAY_FORWARD_RESPONSE_TIMEOUT = 2
-WINDOW_SIZE = 15         # 统计最近 10 次请求
-FAIL_THRESHOLD = 0.5     # 失败率阈值 (50%)
+WINDOW_SIZE = 15         # Count recent 15 requests
+FAIL_THRESHOLD = 0.5     # Failure rate threshold (50%)
 GATEWAY_PORT =  8080
 SERVER_URL = f"http://{LOCAL_HOST}:{SERVER_PORT}"
 
@@ -66,7 +64,6 @@ ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "
 
 ML_TASK_TYPES_TRADITIONAL = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]
 
-
 EXPERIMENT_RESULT_FILE_NAME = 'result.txt'
 
 FAULT_QUEUE_POLL_TIME = 2
@@ -79,24 +76,24 @@ def get_ts() -> str:
 
 def makeup_response(task_type:str):
         response = {}
-        # 50% 概率成功，50% 概率失败
+        # 50% chance of success, 50% chance of failure
         status = 'success' if random.random() > 0.5 else 'failed'
         
         if status == 'success':
             response['response_data'] = {
                 "code": 200,
-                "message": "处理成功",
+                "message": "Processing successful",
                 "data": {
-                    "result": f"成功处理了{task_type}任务",
+                    "result": f"Successfully processed {task_type} task",
                     "timestamp": get_ts()
                 }
             }
         else:
             response['response_data'] = {
                 "code": 500,
-                "message": "处理失败",
+                "message": "Processing failed",
                 "data": {
-                    "error": "处理超时或系统错误",
+                    "error": "Processing timeout or system error",
                     "timestamp": get_ts()
                 }
             }
@@ -111,13 +108,13 @@ def get_host():
         return ANY_HOST
     
     
-# ================= Valkey (Redis 兼容) 配置 ================
+# ================= Valkey (Redis compatible) Configuration ================
 
-IDEMPOTENCY_EXPIRE = 86400  # 幂等记录保留 24 小时
+IDEMPOTENCY_EXPIRE = 86400  # Idempotency record retention for 24 hours
 VALKEY_ENDPOINT = os.getenv('VALKEY_ENDPOINT', 'localhost')
 REDIS_PORT = 6379
 
-# 逻辑判断：如果在 EC2 环境则连云端，本地则连隧道映射的 localhost
+# Logic: Use cloud endpoint on EC2, use tunneled localhost otherwise
 def get_redis_host():
     if LOCAL_HOST_NAME in socket.gethostname().lower():
         return LOCAL_HOST
@@ -128,21 +125,21 @@ ACTIVE_REDIS_HOST = get_redis_host()
 # ==========================================================    
     
     
-# ================= firebase 配置 ===========================    
+# ================= Firebase Configuration ===========================    
     
 FIREBASE_CERT_PATH = os.getenv('FIREBASE_CERT_PATH', 'serviceAccountKey.json')
     
 # ==========================================================   
     
     
-# ================= rds 配置 ===============================  
+# ================= RDS Configuration ===============================  
     
-MAX_CACHE_SIZE = 1000  # 网关降级库最大缓存条数
+MAX_CACHE_SIZE = 1000  # Maximum cache entries in gateway fallback cache
 ATTEMPT_TIMES = 3
 
 RDS_HOST = os.getenv('RDS_HOST', 'localhost')
 RDS_USER = os.getenv('RDS_USER', 'root')
-RDS_PASSWORD = os.getenv('RDS_PASSWORD')  # 找不到会返回 None
+RDS_PASSWORD = os.getenv('RDS_PASSWORD')  # Returns None if not found
 RDS_DB_NAME = os.getenv('RDS_DB_NAME', 'gatewaycache')
 RDS_DB_TABLE = 'task_cache'
 RDS_PORT = 3306 
@@ -150,14 +147,14 @@ RDS_PORT = 3306
 # ==========================================================       
     
     
-# ================= S3 配置 ===============================  
+# ================= S3 Configuration ===============================  
 
 S3_BUCKET = "s3://distributed-system-bucket-project"
 
 # ========================================================== 
     
 
-# ================= EMR 配置 ===============================  
+# ================= EMR Configuration ===============================  
 
 EMR_CLUSTER_NAME  = "distributed-system-cluster"
 

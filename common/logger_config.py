@@ -4,17 +4,17 @@ import os
 import queue
 import sys
 
-# 用于记录已经启动的监听器，防止重复启动导致的阻塞
+# Used to record already started listeners, preventing blocking caused by duplicate startup
 _activated_listeners = {}
 
 def setup_logger(name: str, log_file: str, level=logging.INFO, max_bytes=50*1024*1024, backup_count=3):
     logger = logging.getLogger(name)
     
-    # --- 关键修改 1：如果已经配置过 Handler，说明已经初始化，直接返回 ---
+    # --- Key Modification 1: If already configured with Handlers, return directly ---
     if logger.handlers:
         return logger
 
-    # 禁用日志向上传递（防止在某些环境下重复打印到 Root Logger）
+    # Disable log upward propagation (prevents duplicate printing to Root Logger in some environments)
     logger.propagate = False
     logger.setLevel(level)
 
@@ -25,29 +25,29 @@ def setup_logger(name: str, log_file: str, level=logging.INFO, max_bytes=50*1024
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-    # 磁盘写入 Handler
+    # Disk writing Handler
     file_handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8'
     )
     file_handler.setFormatter(formatter)
 
-    # 控制台 Handler
+    # Console Handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
 
-    # --- 关键修改 2：为每个实例创建独立的异步队列 ---
+    # --- Key Modification 2: Create independent async queue for each instance ---
     log_queue = queue.Queue(-1)
     
-    # 创建异步监听器
+    # Create async listener
     listener = logging.handlers.QueueListener(
         log_queue, file_handler, console_handler, respect_handler_level=True
     )
     
-    # 启动后台线程并记录
+    # Start background thread and record it
     listener.start()
     _activated_listeners[name] = listener
 
-    # 挂载 Handler
+    # Attach Handler
     queue_handler = logging.handlers.QueueHandler(log_queue)
     logger.addHandler(queue_handler)
 

@@ -21,17 +21,17 @@ class TraditionalClient:
         self.gateway_url = f'http://{self.gateway_host}:{self.gateway_port}'
         
         self.success, self.failed = 0, 0
-        self.latencies = []                # 记录所有成功请求的延迟
-        self.total_bytes_sent = 0          # 网络开销：发送字节数
-        self.total_bytes_received = 0      # 网络开销：接收字节数
-        self.experiment_start_time = 0     # 实验总开始时间
-        self.experiment_end_time = 0       # 实验总结束时间
+        self.latencies = []                # Record latency for all successful requests
+        self.total_bytes_sent = 0          # Network overhead: bytes sent
+        self.total_bytes_received = 0      # Network overhead: bytes received
+        self.experiment_start_time = 0     # Total experiment start time
+        self.experiment_end_time = 0       # Total experiment end time
         # ====================================================
         
         for d in [RESULT_DIR]: os.makedirs(d, exist_ok=True)
    
     def _send_single_request(self, i: int, session: requests.Session):
-        """处理单次请求的逻辑"""
+        """Logic for processing a single request"""
         req_id = f"{i+1:03d}"
         task_type = random.choice(ML_TASK_TYPES_TRADITIONAL)   
         task_id = f"ML-{task_type[:4].upper()}-{random.randint(1, int(REQUEST_TIMES))}"
@@ -42,7 +42,7 @@ class TraditionalClient:
         req_start_time = time.time() 
         
         try:
-            # 使用 session 发起请求，且不含自动重试机制
+            # Use session to initiate request, without automatic retry mechanism
             res = session.get(f"{self.gateway_url}/api/forward", params=params, timeout=REQUEST_TIMEOUT)
             req_end_time = time.time() 
             res_size = len(res.content)
@@ -52,24 +52,24 @@ class TraditionalClient:
             response_data = json_res.get('response_data')
             
             if res.status_code == 200 and json_res.get('status') != 'failed':
-                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] 成功收到响应: ({response_data}) 耗时 {round(latency, 2)}s")
+                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] Successfully received response: ({response_data}) took {round(latency, 2)}s")
                 return True, req_size, res_size, latency
             else:
-                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求失败: {response_data}")
+                self.logger.info(f"[REQ-{req_id}] - [{task_id} - {task_type}] Request failed: {response_data}")
                 return False, req_size, res_size, latency
                 
         except requests.exceptions.Timeout:
-            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] 请求超时（未收到响应）")
+            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] Request timeout (no response received)")
             return False, req_size, 0, 0.0
         except Exception as e:
-            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] 网络异常: {e}")
+            self.logger.error(f"[REQ-{req_id}] - [{task_id} - {task_type}] Network exception: {e}")
             return False, req_size, 0, 0.0
         
     def run(self):
-        self.logger.info(f"开始并发模拟 {REQUEST_TIMES} 个请求， Timeout限制为: {REQUEST_TIMEOUT}s")
+        self.logger.info(f"Starting concurrent simulation of {REQUEST_TIMES} requests, Timeout limit: {REQUEST_TIMEOUT}s")
         self.experiment_start_time = time.time()
         
-        # 使用 Session 并挂载适配器，复用底层 TCP 连接，防止高并发时耗尽本地端口
+        # Use Session with adapter to reuse underlying TCP connections, preventing local port exhaustion under high concurrency
         session = requests.Session()
         adapter = HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS)
         session.mount("http://", adapter)
@@ -124,5 +124,4 @@ Generated: {get_ts()}
 ==================================================
 """
         with open(f"{RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}", "w", encoding="utf-8") as f: f.write(report)
-        self.logger.info(f"实验报告已生成: {RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}")
-
+        self.logger.info(f"Experiment report generated: {RESULT_DIR}/{EXPERIMENT_RESULT_FILE_NAME}")

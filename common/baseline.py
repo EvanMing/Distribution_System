@@ -61,7 +61,7 @@ BACKOFF_FACTOR = 0.3
 MAX_WORKERS = 5
 REQUEST_TIMES = 30
 RETRY_TIMES = 1
-TASK_CRIMINAL_CLASSIFICATION = 'Criminal_Classification'
+TASK_CRIMINAL_CLASSIFICATION = 'Big_Data_Task'
 ML_TASK_TYPES = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment", TASK_CRIMINAL_CLASSIFICATION]
 
 ML_TASK_TYPES_TRADITIONAL = ["Data_Preprocessing", "Feature_Extraction", "Model_Training", "Model_Inference" , "Model_Deployment"]

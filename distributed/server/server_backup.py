@@ -220,14 +220,14 @@ class DistributedBackupServer:
                 JobFlowId=cluster_id,  # 使用真实的集群 ID
                 Steps=[
                     {
-                        'Name': f'Spark_Crime_Classification_{task_id}',
+                        'Name': f'Spark_Big_Data_Task_{task_id}',
                         'ActionOnFailure': 'CONTINUE',  # 失败不关停集群
                         'HadoopJarStep': {
                             'Jar': 'command-runner.jar',
                             'Args': [
                                 'spark-submit',
                                 '--deploy-mode', 'cluster',
-                                f'{S3_BUCKET}/criminal_classification.py'  # S3 上的脚本路径
+                                f'{S3_BUCKET}/Big_Data_Task.py'  # S3 上的脚本路径
                             ]
                         }
                     }
